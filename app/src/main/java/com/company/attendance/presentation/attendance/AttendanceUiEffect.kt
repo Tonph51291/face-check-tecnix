@@ -1,3 +1,10 @@
 package com.company.attendance.presentation.attendance
 
-// Các hiệu ứng một lần (UiEffect) như âm thanh, chuyển màn hình, hiển thị popup kết quả.
+/**
+ * Hiệu ứng một lần (Single-shot effect) trên Màn hình 1
+ */
+sealed interface AttendanceUiEffect {
+    data class ShowToast(val message: String) : AttendanceUiEffect
+    data object PlaySuccessSound : AttendanceUiEffect
+    data object PlayErrorSound : AttendanceUiEffect
+}
