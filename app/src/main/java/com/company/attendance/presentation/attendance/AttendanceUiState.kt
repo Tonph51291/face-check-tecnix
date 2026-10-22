@@ -55,6 +55,7 @@ data class AttendanceUiState(
 
     // Điều hướng màn hình
     val currentScreen: KioskScreen = KioskScreen.ATTENDANCE,
+    val selectedEmployeeId: String? = null,
     val selectedEmployee: com.company.attendance.domain.model.Employee? = null,
     val capturedFaceScore: Int = 98,
 

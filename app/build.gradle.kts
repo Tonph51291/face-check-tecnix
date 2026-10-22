@@ -67,6 +67,13 @@ dependencies {
     // ML Kit Face Detection (Bundled On-Device, Offline, 100% Free Apache 2.0)
     implementation(libs.mlkit.face.detection)
 
+    // Networking (Retrofit, OkHttp, Gson)
+    implementation(libs.retrofit.core)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.okhttp.core)
+    implementation(libs.okhttp.logging)
+    implementation(libs.gson)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -28,10 +28,14 @@ import androidx.compose.ui.unit.sp
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
 /**
- * Thẻ hiển thị quy định ca làm việc
+ * Thẻ hiển thị quy định ca làm việc (Hỗ trợ cấu hình ca động từ API Backend)
  */
 @Composable
 fun ShiftPolicyCard(
+    shiftName: String = "Ca tiêu chuẩn",
+    timeRange: String = "08:30 – 17:30",
+    allowedLateMinutes: Int = 15,
+    assignedKiosk: String = "Kiosk Cổng Chính 1",
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -69,16 +73,16 @@ fun ShiftPolicyCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text(text = "Ca tiêu chuẩn", fontSize = 11.sp, color = EnrollmentColors.OnSurfaceVariant)
-                    Text(text = "08:00 – 17:30", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = EnrollmentColors.OnSurface)
+                    Text(text = shiftName, fontSize = 11.sp, color = EnrollmentColors.OnSurfaceVariant)
+                    Text(text = timeRange, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = EnrollmentColors.OnSurface)
                 }
                 Column {
                     Text(text = "Thời gian cho phép muộn", fontSize = 11.sp, color = EnrollmentColors.OnSurfaceVariant)
-                    Text(text = "Tối đa 15 phút", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = EnrollmentColors.Tertiary)
+                    Text(text = "Tối đa $allowedLateMinutes phút", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = EnrollmentColors.Tertiary)
                 }
                 Column {
                     Text(text = "Thiết bị gán", fontSize = 11.sp, color = EnrollmentColors.OnSurfaceVariant)
-                    Text(text = "Kiosk Cổng Chính 1", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = EnrollmentColors.Primary)
+                    Text(text = assignedKiosk, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = EnrollmentColors.Primary)
                 }
             }
         }

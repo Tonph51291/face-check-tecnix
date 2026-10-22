@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,13 +26,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.company.attendance.presentation.enrollment.AttendanceHistoryItem
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
 /**
- * Thẻ Lịch sử chấm công gần nhất (3 ngày gần nhất)
+ * Thẻ Lịch sử chấm công gần nhất (Chuẩn giao diện Stitch, hỗ trợ nhận dữ liệu động từ API)
  */
 @Composable
 fun AttendanceHistoryCard(
+    historyItems: List<AttendanceHistoryItem>? = null,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -64,9 +67,20 @@ fun AttendanceHistoryCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            AttendanceLogItem("Hôm nay (22/10)", "08:15:32", "Đúng giờ", isGood = true)
-            AttendanceLogItem("Hôm qua (21/10)", "08:09:44", "Đúng giờ", isGood = true)
-            AttendanceLogItem("20/10/2026", "08:24:10", "Muộn 9 phút", isGood = false)
+            if (!historyItems.isNullOrEmpty()) {
+                historyItems.take(5).forEach { item ->
+                    AttendanceLogItem(
+                        date = item.date,
+                        time = item.time,
+                        status = item.status,
+                        isGood = item.isGood
+                    )
+                }
+            } else {
+                // Fallback nếu nhân viên chưa có lịch sử nào trên BE
+                AttendanceLogItem("Hôm nay", "--:--", "Chưa chấm công", isGood = true)
+                AttendanceLogItem("Hôm qua", "--:--", "Không có dữ liệu", isGood = true)
+            }
         }
     }
 }

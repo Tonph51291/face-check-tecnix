@@ -1,8 +1,11 @@
 package com.company.attendance.domain.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Thực thể biểu diễn thông tin nhân viên trong hệ thống chấm công sinh trắc học TECNIX
  */
+@Immutable
 data class Employee(
     val id: String,
     val name: String,

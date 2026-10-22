@@ -149,7 +149,7 @@ class AttendanceViewModel(
             is AttendanceUiEvent.OnSelectEmployee -> {
                 _uiState.update {
                     it.copy(
-                        selectedEmployee = event.employee,
+                        selectedEmployeeId = event.employeeId,
                         currentScreen = KioskScreen.EMPLOYEE_DETAIL
                     )
                 }

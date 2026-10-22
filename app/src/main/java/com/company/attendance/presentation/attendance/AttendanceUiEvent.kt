@@ -23,7 +23,7 @@ sealed interface AttendanceUiEvent {
     data class OnToggleSettingsDialog(val isVisible: Boolean) : AttendanceUiEvent
     data class OnToggleEmployeeSearch(val isVisible: Boolean) : AttendanceUiEvent
     data class OnNavigateToScreen(val screen: KioskScreen) : AttendanceUiEvent
-    data class OnSelectEmployee(val employee: com.company.attendance.domain.model.Employee) : AttendanceUiEvent
+    data class OnSelectEmployee(val employeeId: String) : AttendanceUiEvent
     data object OnCaptureFaceSample : AttendanceUiEvent
     data class OnConfirmEnrollment(val employeeId: String) : AttendanceUiEvent
     data class OnToggleRealMode(val isReal: Boolean) : AttendanceUiEvent

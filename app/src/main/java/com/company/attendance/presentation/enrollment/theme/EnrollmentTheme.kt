@@ -32,6 +32,10 @@ object EnrollmentColors {
     val WarningTagBg = Color(0xFFFFDAD6)
     val WarningTagText = Color(0xFF93000A)
 
+    val Error = Color(0xFFBA1A1A)
+    val OnError = Color(0xFFFFFFFF)
     val ErrorContainer = Color(0xFFFFDAD6)
     val OnErrorContainer = Color(0xFF93000A)
+
+    val SurfaceVariant = Color(0xFFE1E2EC)
 }

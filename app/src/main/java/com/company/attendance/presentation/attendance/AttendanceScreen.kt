@@ -274,15 +274,16 @@ fun AttendanceScreen(
                 onNavigateBack = {
                     viewModel.onEvent(AttendanceUiEvent.OnNavigateToScreen(KioskScreen.ATTENDANCE))
                 },
-                onEmployeeSelected = { employee ->
-                    viewModel.onEvent(AttendanceUiEvent.OnSelectEmployee(employee))
+                onEmployeeSelected = { employeeId ->
+                    viewModel.onEvent(AttendanceUiEvent.OnSelectEmployee(employeeId))
                 }
             )
         }
 
         KioskScreen.EMPLOYEE_DETAIL -> {
+            val employeeId = uiState.selectedEmployeeId ?: activeEmployee.code.ifBlank { activeEmployee.id }
             EmployeeDetailScreen(
-                employee = activeEmployee,
+                employeeId = employeeId,
                 onNavigateBack = {
                     viewModel.onEvent(AttendanceUiEvent.OnNavigateToScreen(KioskScreen.EMPLOYEE_SEARCH))
                 },
