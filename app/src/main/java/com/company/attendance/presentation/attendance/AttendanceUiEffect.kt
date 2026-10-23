@@ -7,4 +7,5 @@ sealed interface AttendanceUiEffect {
     data class ShowToast(val message: String) : AttendanceUiEffect
     data object PlaySuccessSound : AttendanceUiEffect
     data object PlayErrorSound : AttendanceUiEffect
+    data object PlayWarningSound : AttendanceUiEffect
 }

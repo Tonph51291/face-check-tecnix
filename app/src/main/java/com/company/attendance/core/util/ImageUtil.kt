@@ -14,7 +14,7 @@ object ImageUtil {
     /**
      * Chuyển đổi Bitmap sang chuỗi Base64 chuẩn JPEG.
      */
-    fun bitmapToBase64(bitmap: Bitmap, quality: Int = 85): String {
+    fun bitmapToBase64(bitmap: Bitmap, quality: Int = 80): String {
         val outputStream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
         val byteArray = outputStream.toByteArray()
@@ -24,7 +24,7 @@ object ImageUtil {
     /**
      * Giảm kích thước ảnh nếu vượt quá maxDimension để tối ưu băng thông mạng và tốc độ AI.
      */
-    fun downscaleIfNeeded(bitmap: Bitmap, maxDimension: Int = 1080): Bitmap {
+    fun downscaleIfNeeded(bitmap: Bitmap, maxDimension: Int = 720): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
         val maxSide = max(width, height)
@@ -41,9 +41,25 @@ object ImageUtil {
 }
 
 /**
- * Extension function tiện dụng cho Bitmap
+ * Extension function tiện dụng cho Bitmap, hỗ trợ tự động giải phóng native memory.
  */
-fun Bitmap.toBase64Jpeg(quality: Int = 85, maxDimension: Int = 1080): String {
+fun Bitmap.toBase64Jpeg(
+    quality: Int = 80,
+    maxDimension: Int = 720,
+    recycleSource: Boolean = false
+): String {
     val scaledBitmap = ImageUtil.downscaleIfNeeded(this, maxDimension)
-    return ImageUtil.bitmapToBase64(scaledBitmap, quality)
+    val base64 = ImageUtil.bitmapToBase64(scaledBitmap, quality)
+
+    // Nếu tạo Bitmap trung gian khi scale thì giải phóng ngay lập tức khỏi Native Heap
+    if (scaledBitmap != this && !scaledBitmap.isRecycled) {
+        scaledBitmap.recycle()
+    }
+
+    // Nếu người gọi yêu cầu giải phóng luôn bitmap nguồn
+    if (recycleSource && !this.isRecycled) {
+        this.recycle()
+    }
+
+    return base64
 }

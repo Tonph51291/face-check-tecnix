@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -50,12 +51,28 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.company.attendance.presentation.attendance.RecognitionStatus
-import com.company.attendance.presentation.common.theme.CyanAccent
-import com.company.attendance.presentation.common.theme.ErrorRed
-import com.company.attendance.presentation.common.theme.PrimaryBlue
-import com.company.attendance.presentation.common.theme.Slate900
-import com.company.attendance.presentation.common.theme.SuccessGreen
-import com.company.attendance.presentation.common.theme.WarningAmber
+
+
+private val LaserColors = listOf(
+    Color.Transparent,
+    Color(0xFF38BDF8).copy(alpha = 0.35f),
+    Color(0xFF38BDF8),
+    Color(0xFF22D3EE),
+    Color(0xFF38BDF8),
+    Color(0xFF38BDF8).copy(alpha = 0.35f),
+    Color.Transparent
+)
+
+private val LaserGlowColors = listOf(
+    Color.Transparent,
+    Color(0xFF38BDF8).copy(alpha = 0.15f),
+    Color(0xFF38BDF8).copy(alpha = 0.35f),
+    Color(0xFF38BDF8).copy(alpha = 0.15f),
+    Color.Transparent
+)
+
+private val DashIntervals = floatArrayOf(18f, 14f)
+private val OvalDashEffect = PathEffect.dashPathEffect(DashIntervals, 0f)
 
 /**
  * Lớp phủ hướng dẫn quét khuôn mặt sinh trắc học chuẩn thiết kế Stitch Kiosk:
@@ -109,6 +126,11 @@ fun FaceGuideOverlay(
                 else -> Color(0xFF3B82F6) // Blue-500
             }
 
+            val pathTL = remember { Path() }
+            val pathTR = remember { Path() }
+            val pathBL = remember { Path() }
+            val pathBR = remember { Path() }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -120,40 +142,36 @@ fun FaceGuideOverlay(
                         val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
 
                         // Top-Left corner
-                        val pathTL = Path().apply {
-                            moveTo(0f, cornerLength)
-                            lineTo(0f, radius)
-                            quadraticTo(0f, 0f, radius, 0f)
-                            lineTo(cornerLength, 0f)
-                        }
+                        pathTL.rewind()
+                        pathTL.moveTo(0f, cornerLength)
+                        pathTL.lineTo(0f, radius)
+                        pathTL.quadraticTo(0f, 0f, radius, 0f)
+                        pathTL.lineTo(cornerLength, 0f)
                         drawPath(pathTL, cornerColor, style = stroke)
 
                         // Top-Right corner
-                        val pathTR = Path().apply {
-                            moveTo(size.width - cornerLength, 0f)
-                            lineTo(size.width - radius, 0f)
-                            quadraticTo(size.width, 0f, size.width, radius)
-                            lineTo(size.width, cornerLength)
-                        }
+                        pathTR.rewind()
+                        pathTR.moveTo(size.width - cornerLength, 0f)
+                        pathTR.lineTo(size.width - radius, 0f)
+                        pathTR.quadraticTo(size.width, 0f, size.width, radius)
+                        pathTR.lineTo(size.width, cornerLength)
                         drawPath(pathTR, cornerColor, style = stroke)
 
                         // Bottom-Left corner (cách đáy 52dp để không che hint box)
                         val bottomY = size.height - 48.dp.toPx()
-                        val pathBL = Path().apply {
-                            moveTo(0f, bottomY - cornerLength)
-                            lineTo(0f, bottomY - radius)
-                            quadraticTo(0f, bottomY, radius, bottomY)
-                            lineTo(cornerLength, bottomY)
-                        }
+                        pathBL.rewind()
+                        pathBL.moveTo(0f, bottomY - cornerLength)
+                        pathBL.lineTo(0f, bottomY - radius)
+                        pathBL.quadraticTo(0f, bottomY, radius, bottomY)
+                        pathBL.lineTo(cornerLength, bottomY)
                         drawPath(pathBL, cornerColor, style = stroke)
 
                         // Bottom-Right corner
-                        val pathBR = Path().apply {
-                            moveTo(size.width - cornerLength, bottomY)
-                            lineTo(size.width - radius, bottomY)
-                            quadraticTo(size.width, bottomY, size.width, bottomY - radius)
-                            lineTo(size.width, bottomY - cornerLength)
-                        }
+                        pathBR.rewind()
+                        pathBR.moveTo(size.width - cornerLength, bottomY)
+                        pathBR.lineTo(size.width - radius, bottomY)
+                        pathBR.quadraticTo(size.width, bottomY, size.width, bottomY - radius)
+                        pathBR.lineTo(size.width, bottomY - cornerLength)
                         drawPath(pathBR, cornerColor, style = stroke)
                     }
             )
@@ -188,12 +206,7 @@ fun FaceGuideOverlay(
                         // Viền chính của Oval
                         val stroke = Stroke(
                             width = ovalStrokeWidth.toPx(),
-                            pathEffect = if (isDashed) PathEffect.dashPathEffect(
-                                floatArrayOf(
-                                    18f,
-                                    14f
-                                ), 0f
-                            ) else null
+                            pathEffect = if (isDashed) OvalDashEffect else null
                         )
                         drawOval(
                             color = ovalColor,
@@ -228,15 +241,7 @@ fun FaceGuideOverlay(
                                 // Tia laser chính
                                 drawRect(
                                     brush = Brush.horizontalGradient(
-                                        colors = listOf(
-                                            Color.Transparent,
-                                            Color(0xFF38BDF8).copy(alpha = 0.35f),
-                                            Color(0xFF38BDF8),
-                                            Color(0xFF22D3EE),
-                                            Color(0xFF38BDF8),
-                                            Color(0xFF38BDF8).copy(alpha = 0.35f),
-                                            Color.Transparent
-                                        ),
+                                        colors = LaserColors,
                                         startX = startX,
                                         endX = endX
                                     ),
@@ -247,13 +252,7 @@ fun FaceGuideOverlay(
                                 // Hào quang mờ quanh tia laser
                                 drawRect(
                                     brush = Brush.horizontalGradient(
-                                        colors = listOf(
-                                            Color.Transparent,
-                                            Color(0xFF38BDF8).copy(alpha = 0.15f),
-                                            Color(0xFF38BDF8).copy(alpha = 0.35f),
-                                            Color(0xFF38BDF8).copy(alpha = 0.15f),
-                                            Color.Transparent
-                                        ),
+                                        colors = LaserGlowColors,
                                         startX = startX,
                                         endX = endX
                                     ),

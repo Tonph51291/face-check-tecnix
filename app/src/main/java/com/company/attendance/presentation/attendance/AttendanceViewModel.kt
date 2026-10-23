@@ -1,10 +1,22 @@
 package com.company.attendance.presentation.attendance
 
+import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.company.attendance.core.logging.logD
+import com.company.attendance.core.logging.logI
+import com.company.attendance.core.result.Result
+import com.company.attendance.core.util.toBase64Jpeg
+import com.company.attendance.di.RepositoryModule
 import com.company.attendance.domain.ml.LivenessChecker
+import com.company.attendance.domain.model.AttendanceRecord
 import com.company.attendance.domain.model.FaceAlignmentStatus
 import com.company.attendance.domain.model.FaceDetectionData
+import com.company.attendance.domain.repository.AttendanceRepository
+import com.company.attendance.domain.repository.EmployeeRepository
+import com.company.attendance.domain.usecase.EnrollFaceUseCase
+import com.company.attendance.domain.usecase.RecognizeFaceUseCase
+import com.company.attendance.domain.usecase.SubmitAttendanceUseCase
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -16,25 +28,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import com.company.attendance.core.result.Result
-import com.company.attendance.di.RepositoryModule
-import com.company.attendance.domain.model.AttendanceRecord
-import com.company.attendance.domain.repository.EmployeeRepository
-import com.company.attendance.domain.usecase.EnrollFaceUseCase
-import com.company.attendance.domain.usecase.RecognizeFaceUseCase
-import com.company.attendance.domain.usecase.SubmitAttendanceUseCase
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class AttendanceViewModel(
+    private val attendanceRepository: AttendanceRepository = RepositoryModule.attendanceRepository,
     private val recognizeFaceUseCase: RecognizeFaceUseCase = RecognizeFaceUseCase(RepositoryModule.employeeRepository),
     private val submitAttendanceUseCase: SubmitAttendanceUseCase = SubmitAttendanceUseCase(RepositoryModule.attendanceRepository),
     private val enrollFaceUseCase: EnrollFaceUseCase = EnrollFaceUseCase(RepositoryModule.employeeRepository),
     private val employeeRepository: EmployeeRepository = RepositoryModule.employeeRepository
 ) : ViewModel() {
-
 
     private val _uiState = MutableStateFlow(AttendanceUiState())
     val uiState: StateFlow<AttendanceUiState> = _uiState.asStateFlow()
@@ -44,6 +49,12 @@ class AttendanceViewModel(
 
     private val livenessChecker = LivenessChecker()
 
+    private var bitmapProvider: (() -> Bitmap?)? = null
+
+    fun setBitmapProvider(provider: () -> Bitmap?) {
+        this.bitmapProvider = provider
+    }
+
     private var clockJob: Job? = null
     private var autoDismissJob: Job? = null
     private var verificationJob: Job? = null
@@ -51,6 +62,9 @@ class AttendanceViewModel(
     // Đếm số frame liên tiếp khuôn mặt nằm chuẩn vị trí
     private var consecutiveAlignedFrames = 0
     private val requiredAlignedFrames = 5 // ~650ms - 800ms giữ ổn định
+
+    // Đếm số frame không có khuôn mặt để xác nhận người vừa chấm đã rời camera
+    private var clearanceNoFaceFrames = 0
 
     // Lưu trackingId và thời điểm chấm công gần nhất để chống chấm lặp liên tục
     private var lastCheckedTrackingId: Int? = null
@@ -145,7 +159,9 @@ class AttendanceViewModel(
                     it.copy(
                         currentScreen = event.screen,
                         isSettingsDialogVisible = false,
-                        isEmployeeSearchVisible = (event.screen == KioskScreen.EMPLOYEE_SEARCH)
+                        isEmployeeSearchVisible = (event.screen == KioskScreen.EMPLOYEE_SEARCH),
+                        selectedEmployee = if (event.screen == KioskScreen.ATTENDANCE) null else it.selectedEmployee,
+                        capturedBitmap = if (event.screen == KioskScreen.ATTENDANCE) null else it.capturedBitmap
                     )
                 }
             }
@@ -227,10 +243,39 @@ class AttendanceViewModel(
         if (currentStatus == RecognitionStatus.VERIFYING ||
             currentStatus == RecognitionStatus.SUCCESS ||
             currentStatus == RecognitionStatus.FAILURE ||
+            currentStatus == RecognitionStatus.DUPLICATE ||
             currentStatus == RecognitionStatus.COOLDOWN ||
             currentStatus == RecognitionStatus.CAMERA_ERROR ||
             currentStatus == RecognitionStatus.PERMISSION_DENIED
         ) {
+            return
+        }
+
+        // Kiểm tra cơ chế Face Clearance: Bắt buộc người vừa chấm phải rời khỏi camera
+        if (_uiState.value.isWaitingFaceClearance) {
+            if (faceData == null) {
+                clearanceNoFaceFrames++
+                if (clearanceNoFaceFrames >= 3) { // ~350ms - 500ms không còn mặt trong khung hình
+                    clearanceNoFaceFrames = 0
+                    _uiState.update {
+                        it.copy(
+                            isWaitingFaceClearance = false,
+                            activeGuidance = "Vui lòng nhìn thẳng vào camera",
+                            confidenceText = "Đang tìm khuôn mặt..."
+                        )
+                    }
+                }
+            } else {
+                clearanceNoFaceFrames = 0
+                _uiState.update {
+                    it.copy(
+                        faceData = faceData,
+                        activeGuidance = "Bạn vừa hoàn tất chấm công. Vui lòng nhường vị trí cho người tiếp theo.",
+                        confidenceText = "Vui lòng nhường vị trí",
+                        stabilityProgress = 0f
+                    )
+                }
+            }
             return
         }
 
@@ -251,12 +296,6 @@ class AttendanceViewModel(
             return
         }
 
-        // Ghi nhận chỉ số để phân tích liveness vi mô
-        livenessChecker.recordFrame(
-            leftEyeOpen = faceData.leftEyeOpenProbability,
-            rightEyeOpen = faceData.rightEyeOpenProbability,
-            yaw = faceData.headEulerAngleY
-        )
 
         // Kiểm tra chống chấm công lặp liên tục cho cùng một trackingId
         val now = System.currentTimeMillis()
@@ -312,7 +351,6 @@ class AttendanceViewModel(
                     alignmentStatus = FaceAlignmentStatus.ALIGNED,
                     activeGuidance = "Khuôn mặt chuẩn. Vui lòng giữ yên...",
                     confidenceText = "Đang giữ vị trí (${(progress * 100).toInt()}%)",
-                    stabilityProgress = progress
                 )
             }
         } else {
@@ -323,7 +361,7 @@ class AttendanceViewModel(
     }
 
     /**
-     * Tiến hành bước VERIFYING (nhận diện danh tính offline)
+     * Tiến hành bước VERIFYING: Chấm công bằng nhận diện khuôn mặt qua FaceCheck AI Service.
      */
     private fun triggerVerification(faceData: FaceDetectionData) {
         verificationJob?.cancel()
@@ -332,16 +370,11 @@ class AttendanceViewModel(
                 current.copy(
                     status = RecognitionStatus.VERIFYING,
                     faceData = faceData,
-                    activeGuidance = "Đang phân tích khuôn mặt trên thiết bị...",
-                    confidenceText = "Đang nhận diện...",
+                    activeGuidance = "Đang nhận diện khuôn mặt qua AI Server...",
+                    confidenceText = "Đang đối chiếu...",
                     stabilityProgress = 1f
                 )
             }
-
-            delay(600) // Thời gian suy luận mô phỏng trên frame
-
-            // Đánh giá liveness offline
-            val liveness = livenessChecker.evaluate()
 
             // Ghi nhận trackingId để chống lặp
             faceData.trackingId?.let {
@@ -349,71 +382,152 @@ class AttendanceViewModel(
                 lastCheckedTimestamp = System.currentTimeMillis()
             }
 
-            // Điều phối qua Domain UseCases: RecognizeFaceUseCase & SubmitAttendanceUseCase
-            val result = recognizeFaceUseCase(faceData)
-            when (result) {
-                is Result.Success -> {
-                    val matchResult = result.data
-                    if (matchResult.isMatched && matchResult.matchedEmployee != null) {
-                        val emp = matchResult.matchedEmployee
-                        val nowTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                        val nowDate = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+            if (_uiState.value.isRealMode) {
+                val bitmap = bitmapProvider?.invoke()
+                if (bitmap != null) {
+                    val base64 = bitmap.toBase64Jpeg(quality = 80, maxDimension = 720, recycleSource = true)
+                    logI("Gửi ảnh khuôn mặt chấm công lên FaceCheck AI Backend...")
+                    val result = attendanceRepository.checkIn(imageBase64 = base64)
+                    when (result) {
+                        is Result.Success -> {
+                            val record = result.data
+                            val scorePercent = record.matchScore.toInt()
+                            val nowTime = record.timeFormatted
+                            val attendanceType = record.attendanceType.serverKey
+                            val attendanceStatus = record.status.displayName
 
-                        // Ghi nhận bản ghi chấm công qua UseCase
-                        val record = AttendanceRecord(
-                            id = System.currentTimeMillis().toString(),
-                            employeeId = emp.id,
-                            employeeName = emp.name,
-                            employeeCode = emp.code,
-                            department = emp.department,
-                            timestamp = System.currentTimeMillis(),
-                            timeFormatted = nowTime,
-                            dateFormatted = nowDate,
-                            matchScore = matchResult.similarityScore * 100f
-                        )
-                        submitAttendanceUseCase(record)
-
-                        _uiState.update { current ->
-                            current.copy(
-                                status = RecognitionStatus.SUCCESS,
-                                confidenceText = "Đã khớp: ${(matchResult.similarityScore * 100).toInt()}%",
-                                resultData = AttendanceResultData(
-                                    employeeName = emp.name,
-                                    employeeCode = emp.code,
-                                    department = emp.department,
-                                    checkInTime = nowTime,
-                                    matchScore = matchResult.similarityScore * 100f,
-                                    isDemo = false
-                                ),
-                                autoDismissRemainingSeconds = 3
-                            )
+                            logI("Chấm công thành công [${record.attendanceType.name}]: ${record.employeeName} (${record.employeeId}) - $attendanceStatus")
+                            _uiState.update { current ->
+                                current.copy(
+                                    status = RecognitionStatus.SUCCESS,
+                                    confidenceText = "Đã khớp: $scorePercent%",
+                                    resultData = AttendanceResultData(
+                                        employeeName = record.employeeName,
+                                        employeeCode = record.employeeCode,
+                                        department = record.department,
+                                        checkInTime = nowTime,
+                                        matchScore = record.matchScore,
+                                        attendanceType = attendanceType,
+                                        attendanceStatus = attendanceStatus,
+                                        serverMessage = record.serverMessage ?: if (record.attendanceType == com.company.attendance.domain.model.AttendanceType.CHECK_OUT) "Chấm công tan ca thành công" else "Chấm công vào ca thành công",
+                                        isDemo = false
+                                    ),
+                                    autoDismissRemainingSeconds = 3,
+                                    isWaitingFaceClearance = true
+                                )
+                            }
+                            _uiEffect.emit(AttendanceUiEffect.PlaySuccessSound)
+                            startAutoDismissCountdown()
                         }
-                        _uiEffect.emit(AttendanceUiEffect.PlaySuccessSound)
-                        startAutoDismissCountdown()
-                    } else {
+                        is Result.Error -> {
+                            val error = result.error
+                            if (error is com.company.attendance.core.result.AppError.DuplicateAttendance) {
+                                logI("Chấm công bị trùng: ${error.message}")
+                                _uiState.update { current ->
+                                    current.copy(
+                                        status = RecognitionStatus.DUPLICATE,
+                                        duplicateMessage = error.message,
+                                        confidenceText = "Đã ghi nhận",
+                                        autoDismissRemainingSeconds = 3,
+                                        isWaitingFaceClearance = true
+                                    )
+                                }
+                                _uiEffect.emit(AttendanceUiEffect.PlayWarningSound)
+                                startAutoDismissCountdown()
+                            } else {
+                                logD("Chấm công không thành công: ${error.message}")
+                                _uiState.update { current ->
+                                    current.copy(
+                                        status = RecognitionStatus.FAILURE,
+                                        failureReason = error.message,
+                                        confidenceText = "Không thành công",
+                                        autoDismissRemainingSeconds = 3
+                                    )
+                                }
+                                _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
+                                startAutoDismissCountdown()
+                            }
+                        }
+                    }
+                } else {
+                    _uiState.update { current ->
+                        current.copy(
+                            status = RecognitionStatus.FAILURE,
+                            failureReason = "Không thể lấy hình ảnh từ camera. Vui lòng căn chỉnh lại.",
+                            confidenceText = "Lỗi chụp khung hình",
+                            autoDismissRemainingSeconds = 3
+                        )
+                    }
+                    _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
+                    startAutoDismissCountdown()
+                }
+            } else {
+                // Chế độ mô phỏng / offline
+                delay(600)
+                val result = recognizeFaceUseCase(faceData)
+                when (result) {
+                    is Result.Success -> {
+                        val matchResult = result.data
+                        if (matchResult.isMatched && matchResult.matchedEmployee != null) {
+                            val emp = matchResult.matchedEmployee
+                            val nowTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                            val nowDate = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+
+                            val record = AttendanceRecord(
+                                id = System.currentTimeMillis().toString(),
+                                employeeId = emp.id,
+                                employeeName = emp.name,
+                                employeeCode = emp.code,
+                                department = emp.department,
+                                timestamp = System.currentTimeMillis(),
+                                timeFormatted = nowTime,
+                                dateFormatted = nowDate,
+                                matchScore = matchResult.similarityScore * 100f
+                            )
+                            submitAttendanceUseCase(record)
+
+                            _uiState.update { current ->
+                                current.copy(
+                                    status = RecognitionStatus.SUCCESS,
+                                    confidenceText = "Đã khớp: ${(matchResult.similarityScore * 100).toInt()}%",
+                                    resultData = AttendanceResultData(
+                                        employeeName = emp.name,
+                                        employeeCode = emp.code,
+                                        department = emp.department,
+                                        checkInTime = nowTime,
+                                        matchScore = matchResult.similarityScore * 100f,
+                                        isDemo = true
+                                    ),
+                                    autoDismissRemainingSeconds = 3
+                                )
+                            }
+                            _uiEffect.emit(AttendanceUiEffect.PlaySuccessSound)
+                            startAutoDismissCountdown()
+                        } else {
+                            _uiState.update { current ->
+                                current.copy(
+                                    status = RecognitionStatus.FAILURE,
+                                    failureReason = matchResult.message,
+                                    confidenceText = "Chưa nhận diện danh tính",
+                                    autoDismissRemainingSeconds = 3
+                                )
+                            }
+                            _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
+                            startAutoDismissCountdown()
+                        }
+                    }
+                    is Result.Error -> {
                         _uiState.update { current ->
                             current.copy(
                                 status = RecognitionStatus.FAILURE,
-                                failureReason = matchResult.message,
-                                confidenceText = "Chưa nhận diện danh tính",
+                                failureReason = result.error.message,
+                                confidenceText = "Lỗi nhận diện",
                                 autoDismissRemainingSeconds = 3
                             )
                         }
                         _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
                         startAutoDismissCountdown()
                     }
-                }
-                is Result.Error -> {
-                    _uiState.update { current ->
-                        current.copy(
-                            status = RecognitionStatus.FAILURE,
-                            failureReason = result.error.message,
-                            confidenceText = "Lỗi nhận diện",
-                            autoDismissRemainingSeconds = 3
-                        )
-                    }
-                    _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
-                    startAutoDismissCountdown()
                 }
             }
         }
@@ -440,9 +554,12 @@ class AttendanceViewModel(
                         department = "Phòng Công nghệ Phần mềm",
                         checkInTime = nowTime,
                         matchScore = 99.4f,
+                        attendanceType = "CHECK_IN",
+                        attendanceStatus = "Đúng giờ",
                         isDemo = true
                     ),
-                    autoDismissRemainingSeconds = 3
+                    autoDismissRemainingSeconds = 3,
+                    isWaitingFaceClearance = true
                 )
             }
             _uiEffect.emit(AttendanceUiEffect.PlaySuccessSound)
@@ -495,10 +612,11 @@ class AttendanceViewModel(
                 status = RecognitionStatus.IDLE,
                 faceData = null,
                 alignmentStatus = FaceAlignmentStatus.NO_FACE,
-                activeGuidance = "Vui lòng nhìn thẳng vào camera",
-                confidenceText = "Đang tìm khuôn mặt...",
+                activeGuidance = if (current.isWaitingFaceClearance) "Vui lòng nhường vị trí cho người tiếp theo." else "Vui lòng nhìn thẳng vào camera",
+                confidenceText = if (current.isWaitingFaceClearance) "Vui lòng nhường vị trí" else "Đang tìm khuôn mặt...",
                 stabilityProgress = 0f,
-                resultData = null
+                resultData = null,
+                duplicateMessage = null
             )
         }
     }

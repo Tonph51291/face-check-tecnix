@@ -13,6 +13,11 @@ data class AttendanceRecord(
     val timeFormatted: String,
     val dateFormatted: String,
     val matchScore: Float,
-    val status: String = "Đúng giờ",
+    val status: AttendanceStatus = AttendanceStatus.ON_TIME,
+    val attendanceType: AttendanceType = AttendanceType.CHECK_IN,
+    val serverMessage: String? = null,
     val isSynced: Boolean = false
-)
+) {
+    val statusText: String get() = status.displayName
+    val typeText: String get() = attendanceType.displayName
+}

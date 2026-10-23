@@ -20,6 +20,10 @@ sealed interface AppError {
     data class CameraError(override val message: String = "Không thể kết nối đến camera thiết bị.") : AppError
     data class PermissionDenied(override val message: String = "Quyền truy cập camera bị từ chối.") : AppError
 
+    // Lỗi nghiệp vụ chấm công & ca kíp
+    data class DuplicateAttendance(override val message: String = "Bạn vừa hoàn tất chấm công trong thời gian quy định.") : AppError
+    data class OutsideAttendanceWindow(override val message: String = "Hiện đang ngoài khung giờ chấm công quy định.") : AppError
+
     // Lỗi mạng & hệ thống
     data class NetworkError(override val message: String = "Lỗi kết nối mạng đến máy chủ trung tâm.") : AppError
     data class DatabaseError(override val message: String = "Lỗi truy xuất cơ sở dữ liệu cục bộ.") : AppError

@@ -150,6 +150,6 @@ fun logE(message: String, throwable: Throwable? = null, tag: String? = null) {
 }
 
 /** Gọi nhanh: logApi("/api/v1/employees", "200 OK", "8 nhân viên") */
-fun logApi(endpoint: String, status: String, details: String = "", tag: String? = null) {
+fun logApi(endpoint: String , status: String, details: String = "", tag: String? = null) {
     AppLogger.api(endpoint, status, details, tag)
 }

@@ -34,8 +34,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,11 +59,10 @@ import com.company.attendance.presentation.attendance.components.KioskSettingsBo
 import com.company.attendance.presentation.common.components.CameraPreview
 import com.company.attendance.presentation.common.components.FailureStatusBanner
 import com.company.attendance.presentation.common.components.SuccessStatusBanner
+import com.company.attendance.presentation.common.components.DuplicateStatusBanner
 import com.company.attendance.presentation.common.theme.ErrorRed
 import com.company.attendance.presentation.common.theme.OnPrimary
-import com.company.attendance.presentation.common.theme.OnSurfaceVariant
 import com.company.attendance.presentation.common.theme.PrimaryBlue
-import com.company.attendance.presentation.common.theme.Slate950
 import com.company.attendance.presentation.common.theme.SurfaceCanvas
 
 /**
@@ -102,7 +99,15 @@ fun AttendanceScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    val activeEmployee = uiState.selectedEmployee ?: defaultFallbackEmployee
+    val vignetteBrush = androidx.compose.runtime.remember {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color.Black.copy(alpha = 0.60f),
+                Color.Transparent,
+                Color.Black.copy(alpha = 0.85f)
+            )
+        )
+    }
 
     when (uiState.currentScreen) {
         KioskScreen.ATTENDANCE -> {
@@ -181,6 +186,9 @@ fun AttendanceScreen(
                                     onFaceDetected = { faceData ->
                                         viewModel.onEvent(AttendanceUiEvent.OnFaceFrameAnalyzed(faceData))
                                     },
+                                    onCaptureReady = { provider ->
+                                        viewModel.setBitmapProvider(provider)
+                                    },
                                     onInitialized = {
                                         viewModel.onEvent(AttendanceUiEvent.OnCameraInitialized)
                                     },
@@ -193,15 +201,7 @@ fun AttendanceScreen(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(
-                                            Brush.verticalGradient(
-                                                colors = listOf(
-                                                    Color.Black.copy(alpha = 0.60f),
-                                                    Color.Transparent,
-                                                    Color.Black.copy(alpha = 0.85f)
-                                                )
-                                            )
-                                        )
+                                        .background(vignetteBrush)
                                 )
 
                                 // Lớp phủ khung oval và trạng thái phát hiện khuôn mặt
@@ -213,8 +213,9 @@ fun AttendanceScreen(
                                     stabilityProgress = uiState.stabilityProgress
                                 )
 
-                                // Dialog kết quả Thành công / Thất bại (Floating Modal chuẩn Stitch với nền mờ)
+                                // Dialog kết quả Thành công / Trùng lặp / Thất bại (Floating Modal chuẩn Stitch với nền mờ)
                                 val isShowingResult = (uiState.status == RecognitionStatus.SUCCESS && uiState.resultData != null) ||
+                                        uiState.status == RecognitionStatus.DUPLICATE ||
                                         uiState.status == RecognitionStatus.FAILURE
 
                                 if (isShowingResult) {
@@ -227,6 +228,17 @@ fun AttendanceScreen(
                                         if (uiState.status == RecognitionStatus.SUCCESS && uiState.resultData != null) {
                                             SuccessStatusBanner(
                                                 data = uiState.resultData!!,
+                                                remainingSeconds = uiState.autoDismissRemainingSeconds,
+                                                onDismiss = {
+                                                    viewModel.onEvent(AttendanceUiEvent.OnDismissResult)
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.92f)
+                                                    .padding(horizontal = 16.dp)
+                                            )
+                                        } else if (uiState.status == RecognitionStatus.DUPLICATE) {
+                                            DuplicateStatusBanner(
+                                                message = uiState.duplicateMessage ?: "Bạn vừa hoàn tất chấm công. Vui lòng thử lại sau thời gian quy định.",
                                                 remainingSeconds = uiState.autoDismissRemainingSeconds,
                                                 onDismiss = {
                                                     viewModel.onEvent(AttendanceUiEvent.OnDismissResult)
@@ -281,6 +293,7 @@ fun AttendanceScreen(
         }
 
         KioskScreen.EMPLOYEE_DETAIL -> {
+            val activeEmployee = uiState.selectedEmployee ?: defaultFallbackEmployee
             val employeeId = uiState.selectedEmployeeId ?: activeEmployee.code.ifBlank { activeEmployee.id }
             EmployeeDetailScreen(
                 employeeId = employeeId,
@@ -295,6 +308,7 @@ fun AttendanceScreen(
         }
 
         KioskScreen.FACE_CAPTURE -> {
+            val activeEmployee = uiState.selectedEmployee ?: defaultFallbackEmployee
             FaceCaptureScreen(
                 employee = activeEmployee,
                 onNavigateBack = {
@@ -307,6 +321,7 @@ fun AttendanceScreen(
         }
 
         KioskScreen.FACE_REVIEW -> {
+            val activeEmployee = uiState.selectedEmployee ?: defaultFallbackEmployee
             FaceReviewScreen(
                 employee = activeEmployee,
                 capturedBitmap = uiState.capturedBitmap,

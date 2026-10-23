@@ -16,6 +16,7 @@ enum class RecognitionStatus {
     SUCCESS,           // Xác nhận chấm công thành công
     FAILURE,           // Thất bại (Không khớp / Chưa cấu hình model danh tính)
     COOLDOWN,          // Thời gian hồi sau khi chấm công, tránh lặp lại cùng một người
+    DUPLICATE,         // Đã hoàn tất chấm công trong thời gian quy định (Cooldown từ server)
     CAMERA_ERROR,      // Lỗi camera
     PERMISSION_DENIED  // Chưa có quyền camera
 }
@@ -29,6 +30,9 @@ data class AttendanceResultData(
     val department: String = "Phòng Công nghệ Phần mềm",
     val checkInTime: String = "08:15:32",
     val matchScore: Float = 99.4f,
+    val attendanceType: String = "CHECK_IN", // "CHECK_IN" hoặc "CHECK_OUT"
+    val attendanceStatus: String = "Đúng giờ", // "Đúng giờ" hoặc "Đi muộn"
+    val serverMessage: String? = null,
     val isDemo: Boolean = false
 )
 
@@ -76,6 +80,8 @@ data class AttendanceUiState(
     // Kết quả xác minh
     val resultData: AttendanceResultData? = null,
     val failureReason: String = "Chưa phát hiện danh tính.",
+    val duplicateMessage: String? = null,
+    val isWaitingFaceClearance: Boolean = false, // Chờ người vừa chấm rời khỏi camera
     val autoDismissRemainingSeconds: Int = 5,
 
     // Chế độ & Điều khiển

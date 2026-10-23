@@ -36,11 +36,13 @@ fun CameraPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     var currentAnalyzer: CameraFaceAnalyzer? = remember { null }
+    val backgroundExecutor = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
 
     DisposableEffect(isFrontCamera, lifecycleOwner) {
         onDispose {
             try {
                 currentAnalyzer?.close()
+                backgroundExecutor.shutdown()
                 if (cameraProviderFuture.isDone) {
                     cameraProviderFuture.get().unbindAll()
                 }
@@ -108,7 +110,7 @@ fun CameraPreview(
                             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                             .build()
                             .also {
-                                it.setAnalyzer(executor, analyzer)
+                                it.setAnalyzer(backgroundExecutor, analyzer)
                             }
 
                         cameraProvider.bindToLifecycle(

@@ -1,5 +1,6 @@
 package com.company.attendance.di
 
+import com.company.attendance.data.remote.api.AttendanceApi
 import com.company.attendance.data.remote.api.EmployeeApi
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -65,5 +66,10 @@ object NetworkModule {
     // 5. Cung cấp EmployeeApi Service
     val employeeApi: EmployeeApi by lazy {
         retrofit.create(EmployeeApi::class.java)
+    }
+
+    // 6. Cung cấp AttendanceApi Service
+    val attendanceApi: AttendanceApi by lazy {
+        retrofit.create(AttendanceApi::class.java)
     }
 }
