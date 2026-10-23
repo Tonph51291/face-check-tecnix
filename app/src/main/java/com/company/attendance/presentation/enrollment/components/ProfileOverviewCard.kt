@@ -27,6 +27,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,8 +45,10 @@ import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 @Composable
 fun ProfileOverviewCard(
     employee: Employee,
+    capturedBitmap: Bitmap? = null,
     modifier: Modifier = Modifier
 ) {
+
     val avatarBg = when (employee.avatarColorIndex % 4) {
         0 -> Color(0xFF2457C5)
         1 -> Color(0xFF809FFE)
@@ -77,14 +84,24 @@ fun ProfileOverviewCard(
                         .background(avatarBg),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = employee.avatarInitials.ifBlank { employee.name.take(2).uppercase() },
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = avatarTextColor,
-                        letterSpacing = 1.sp
-                    )
+                    if (capturedBitmap != null) {
+                        Image(
+                            bitmap = capturedBitmap.asImageBitmap(),
+                            contentDescription = "Ảnh khuôn mặt",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Text(
+                            text = employee.avatarInitials.ifBlank { employee.name.take(2).uppercase() },
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = avatarTextColor,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 }
+
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(

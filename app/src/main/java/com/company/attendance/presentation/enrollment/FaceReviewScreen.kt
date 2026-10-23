@@ -58,6 +58,8 @@ import com.company.attendance.presentation.enrollment.components.QualityMetricBo
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 import kotlinx.coroutines.delay
 
+import android.graphics.Bitmap
+
 /**
  * Màn hình 4B: Xem lại mẫu khuôn mặt (Biometric Sample Review & Commit - MVVM Refactored)
  * Node ID: 2d2430e1e6184d31b0b85aefdb0140fc
@@ -68,9 +70,11 @@ fun FaceReviewScreen(
     onNavigateBack: () -> Unit,
     onRetakeSample: () -> Unit,
     onConfirmEnrollment: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    capturedBitmap: Bitmap? = null
 ) {
     var isSaving by remember { mutableStateOf(false) }
+
 
     Surface(
         modifier = modifier
@@ -255,7 +259,11 @@ fun FaceReviewScreen(
                         Spacer(modifier = Modifier.height(14.dp))
 
                         // KHUNG HÌNH MẪU ĐÃ CHỤP VỚI OVERLAY HUD SINH TRẮC HỌC
-                        BiometricCapturedViewport(employee = employee)
+                        BiometricCapturedViewport(
+                            employee = employee,
+                            capturedBitmap = capturedBitmap
+                        )
+
 
                         Spacer(modifier = Modifier.height(14.dp))
 

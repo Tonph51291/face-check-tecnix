@@ -9,9 +9,11 @@ import com.company.attendance.data.remote.mapper.toDomain
 import com.company.attendance.di.NetworkModule
 import com.company.attendance.domain.model.Employee
 import com.company.attendance.domain.repository.EmployeeRepository
+import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
+
 
 /**
  * Triển khai EmployeeRepository kết nối trực tiếp với Backend FaceCheck AI Service qua Retrofit.
@@ -97,5 +99,75 @@ class EmployeeRepositoryImpl(
     ): Result<Employee> = withContext(Dispatchers.IO) {
         // Lấy dữ liệu mới nhất từ backend sau khi đăng ký hoặc cập nhật
         getEmployeeById(employeeId)
+    }
+
+    override suspend fun enrollFaceSample(
+        employeeId: String,
+        imageBase64: String
+    ): Result<com.company.attendance.data.remote.dto.EnrollFaceDataDto> = withContext(Dispatchers.IO) {
+        try {
+            val response = employeeApi.enrollFace(
+                id = employeeId,
+                request = com.company.attendance.data.remote.dto.EnrollFaceRequestDto(faceImageBase64 = imageBase64)
+            )
+
+            if (response.isSuccessful) {
+                val enrollData = response.body()?.data
+                if (enrollData != null) {
+                    logApi(
+                        "/api/v1/employees/$employeeId/enroll-face",
+                        "200 OK",
+                        "Mẫu: ${enrollData.sampleCount}/${enrollData.requiredSamples}, Đã kích hoạt: ${enrollData.hasFaceSample}"
+                    )
+                    Result.Success(enrollData)
+                } else {
+                    Result.Error(AppError.Unknown("Máy chủ không trả về thông tin mẫu nhận diện."))
+                }
+            } else {
+                val rawError = response.errorBody()?.string()
+                val parsedError = try {
+                    Gson().fromJson(rawError, com.company.attendance.data.remote.dto.ApiErrorResponseDto::class.java)
+                } catch (_: Exception) {
+                    null
+                }
+
+                val cleanMessage = parsedError?.message?.trim()?.ifBlank { null }
+                    ?: when (parsedError?.errorCode) {
+                        "FACE_ALREADY_ENROLLED" -> "Khuôn mặt này đã được đăng ký cho một nhân viên khác."
+                        "MAX_SAMPLES" -> "Đã đủ 10 mẫu. Vui lòng xóa mẫu cũ để đăng ký lại."
+                        "NO_FACE" -> "Không tìm thấy khuôn mặt trong khung hình."
+                        "MULTIPLE_FACES" -> "Phát hiện nhiều người. Vui lòng chỉ một người đứng trước camera."
+                        "LOW_QUALITY" -> "Ảnh bị mờ hoặc góc nhìn chưa chuẩn. Hãy giữ yên khuôn mặt."
+                        "FACE_MISMATCH_WITH_EXISTING" -> "Khuôn mặt không khớp các mẫu đã đăng ký của nhân viên này."
+                        "EMPLOYEE_NOT_FOUND" -> "Không tìm thấy thông tin nhân viên."
+                        "IMAGE_TOO_LARGE" -> "Ảnh vượt quá dung lượng cho phép."
+                        else -> response.message().ifBlank { "Không thể lưu mẫu khuôn mặt (Mã ${response.code()})" }
+                    }
+
+                logE("Lỗi đăng ký mẫu [${parsedError?.errorCode ?: response.code()}]: $cleanMessage")
+                Result.Error(AppError.NetworkError(cleanMessage))
+            }
+        } catch (e: IOException) {
+            logE("Mất kết nối máy chủ AI khi gửi mẫu khuôn mặt", e)
+            Result.Error(
+                AppError.NetworkError("Không thể kết nối đến máy chủ AI (${NetworkModule.BASE_URL})"),
+                e
+            )
+        } catch (e: Exception) {
+            logE("Lỗi không xác định khi đăng ký khuôn mặt", e)
+            Result.Error(
+                AppError.Unknown(e.localizedMessage ?: "Lỗi tải mẫu khuôn mặt"),
+                e
+            )
+        }
+    }
+
+    override suspend fun deleteFaceSamples(employeeId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val response = employeeApi.deleteFaceSamples(employeeId)
+            Result.Success(response.isSuccessful)
+        } catch (e: Exception) {
+            Result.Error(AppError.Unknown(e.localizedMessage ?: "Lỗi khi xóa mẫu khuôn mặt"), e)
+        }
     }
 }

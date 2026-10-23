@@ -17,6 +17,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.company.attendance.data.ml.CameraFaceAnalyzer
+import android.graphics.Bitmap
 import com.company.attendance.domain.model.FaceDetectionData
 
 /**
@@ -27,6 +28,7 @@ fun CameraPreview(
     modifier: Modifier = Modifier,
     isFrontCamera: Boolean = true,
     onFaceDetected: (FaceDetectionData?) -> Unit = {},
+    onCaptureReady: ((() -> Bitmap?) -> Unit)? = null,
     onInitialized: () -> Unit = {},
     onError: (String) -> Unit = {}
 ) {
@@ -60,9 +62,14 @@ fun CameraPreview(
                     implementationMode = PreviewView.ImplementationMode.PERFORMANCE
                 }
 
+                onCaptureReady?.invoke {
+                    previewView.bitmap
+                }
+
                 val executor = ContextCompat.getMainExecutor(ctx)
                 cameraProviderFuture.addListener({
                     try {
+
                         val cameraProvider = cameraProviderFuture.get()
                         cameraProvider.unbindAll()
 

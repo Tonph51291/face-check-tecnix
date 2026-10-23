@@ -24,9 +24,11 @@ sealed interface AttendanceUiEvent {
     data class OnToggleEmployeeSearch(val isVisible: Boolean) : AttendanceUiEvent
     data class OnNavigateToScreen(val screen: KioskScreen) : AttendanceUiEvent
     data class OnSelectEmployee(val employeeId: String) : AttendanceUiEvent
-    data object OnCaptureFaceSample : AttendanceUiEvent
+    data class OnCaptureFaceSample(val bitmap: android.graphics.Bitmap? = null) : AttendanceUiEvent
     data class OnConfirmEnrollment(val employeeId: String) : AttendanceUiEvent
+    data class OnRetakeFaceEnrollment(val employeeId: String) : AttendanceUiEvent
     data class OnToggleRealMode(val isReal: Boolean) : AttendanceUiEvent
+
 
     // Mô phỏng kiểm thử
     data object OnSimulateSuccess : AttendanceUiEvent

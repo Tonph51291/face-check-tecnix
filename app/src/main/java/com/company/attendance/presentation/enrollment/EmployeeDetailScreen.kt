@@ -46,6 +46,8 @@ import com.company.attendance.presentation.enrollment.components.ProfileOverview
 import com.company.attendance.presentation.enrollment.components.ShiftPolicyCard
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
+import android.graphics.Bitmap
+
 /**
  * Màn hình: Chi tiết nhân viên chuẩn Stitch (MVVM Refactored & Recomposition Optimized)
  * Node ID: 5333fc82baf84cbfba770a02d79fbc86
@@ -59,11 +61,12 @@ fun EmployeeDetailScreen(
     onNavigateBack: () -> Unit,
     onStartFaceCapture: () -> Unit,
     modifier: Modifier = Modifier,
+    capturedBitmap: Bitmap? = null,
     viewModel: EmployeeDetailViewModel = viewModel(key = employeeId)
 ) {
-    // 1. Kích hoạt gọi API bằng ID (chỉ tải khi ID thay đổi)
+    // 1. Kích hoạt gọi API bằng ID (tải mới dữ liệu mỗi khi mở màn hình)
     LaunchedEffect(employeeId) {
-        viewModel.loadEmployeeDetail(employeeId)
+        viewModel.loadEmployeeDetail(employeeId, forceRefresh = true)
     }
 
     // 2. Thu thập UI State
@@ -75,6 +78,7 @@ fun EmployeeDetailScreen(
 
     EmployeeDetailContent(
         employee = uiState.employee,
+        capturedBitmap = capturedBitmap,
         isLoading = uiState.isLoading,
         errorMessage = uiState.errorMessage,
         shiftName = uiState.shiftName,
@@ -96,6 +100,7 @@ fun EmployeeDetailScreen(
 @Composable
 fun EmployeeDetailContent(
     employee: Employee?,
+    capturedBitmap: Bitmap? = null,
     isLoading: Boolean,
     errorMessage: String?,
     shiftName: String,
@@ -107,6 +112,7 @@ fun EmployeeDetailContent(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+
     Surface(
         modifier = modifier
             .fillMaxSize()
@@ -203,8 +209,13 @@ fun EmployeeDetailContent(
                             }
                         }
                     } else if (employee != null) {
-                        // 1. Thẻ thông tin nhân viên tổng quan
-                        ProfileOverviewCard(employee = employee)
+                        // 1. Thẻ thông tin nhân viên tổng quan (Hiển thị ảnh mặt thực tế sau khi đăng ký)
+                        ProfileOverviewCard(
+                            employee = employee,
+                            capturedBitmap = capturedBitmap
+                        )
+
+
 
                         Spacer(modifier = Modifier.height(14.dp))
 

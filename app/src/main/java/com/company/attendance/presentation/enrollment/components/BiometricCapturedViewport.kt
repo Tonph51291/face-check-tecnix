@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -33,6 +35,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import com.company.attendance.domain.model.Employee
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
@@ -42,8 +48,10 @@ import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 @Composable
 fun BiometricCapturedViewport(
     employee: Employee,
+    capturedBitmap: Bitmap? = null,
     modifier: Modifier = Modifier
 ) {
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -114,12 +122,21 @@ fun BiometricCapturedViewport(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Face,
-                    contentDescription = null,
-                    tint = Color(0xFF67E8F9).copy(alpha = 0.85f),
-                    modifier = Modifier.size(80.dp)
-                )
+                if (capturedBitmap != null) {
+                    Image(
+                        bitmap = capturedBitmap.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Face,
+                        contentDescription = null,
+                        tint = Color(0xFF67E8F9).copy(alpha = 0.85f),
+                        modifier = Modifier.size(80.dp)
+                    )
+                }
 
                 // Floating Metadata Pills ở chân ảnh
                 Row(

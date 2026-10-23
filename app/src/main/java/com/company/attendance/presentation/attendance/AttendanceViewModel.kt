@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import com.company.attendance.core.result.Result
 import com.company.attendance.di.RepositoryModule
 import com.company.attendance.domain.model.AttendanceRecord
+import com.company.attendance.domain.repository.EmployeeRepository
 import com.company.attendance.domain.usecase.EnrollFaceUseCase
 import com.company.attendance.domain.usecase.RecognizeFaceUseCase
 import com.company.attendance.domain.usecase.SubmitAttendanceUseCase
@@ -30,8 +31,10 @@ import java.util.Locale
 class AttendanceViewModel(
     private val recognizeFaceUseCase: RecognizeFaceUseCase = RecognizeFaceUseCase(RepositoryModule.employeeRepository),
     private val submitAttendanceUseCase: SubmitAttendanceUseCase = SubmitAttendanceUseCase(RepositoryModule.attendanceRepository),
-    private val enrollFaceUseCase: EnrollFaceUseCase = EnrollFaceUseCase(RepositoryModule.employeeRepository)
+    private val enrollFaceUseCase: EnrollFaceUseCase = EnrollFaceUseCase(RepositoryModule.employeeRepository),
+    private val employeeRepository: EmployeeRepository = RepositoryModule.employeeRepository
 ) : ViewModel() {
+
 
     private val _uiState = MutableStateFlow(AttendanceUiState())
     val uiState: StateFlow<AttendanceUiState> = _uiState.asStateFlow()
@@ -153,11 +156,21 @@ class AttendanceViewModel(
                         currentScreen = KioskScreen.EMPLOYEE_DETAIL
                     )
                 }
+                viewModelScope.launch {
+                    val result = employeeRepository.getEmployeeById(event.employeeId)
+                    val emp = result.getOrNull()
+                    if (emp != null) {
+                        _uiState.update { it.copy(selectedEmployee = emp) }
+                    }
+                }
+
+
             }
             is AttendanceUiEvent.OnCaptureFaceSample -> {
                 _uiState.update {
                     it.copy(
                         capturedFaceScore = 98,
+                        capturedBitmap = event.bitmap,
                         currentScreen = KioskScreen.FACE_REVIEW
                     )
                 }
@@ -174,6 +187,18 @@ class AttendanceViewModel(
                     }
                 }
             }
+            is AttendanceUiEvent.OnRetakeFaceEnrollment -> {
+                viewModelScope.launch {
+                    employeeRepository.deleteFaceSamples(event.employeeId)
+                }
+                _uiState.update {
+                    it.copy(
+                        currentScreen = KioskScreen.FACE_CAPTURE,
+                        capturedBitmap = null
+                    )
+                }
+            }
+
             is AttendanceUiEvent.OnToggleRealMode -> {
                 resetToIdle()
                 _uiState.update { it.copy(isRealMode = event.isReal) }

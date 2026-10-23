@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,10 +45,17 @@ import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
 /**
  * Khung ngắm Camera HUD công nghệ cao (4 góc kim loại cyan, oval chấm bi, thước đo chất lượng)
+ * Tích hợp luồng camera thực tế, hiển thị hướng dẫn căn chỉnh và tiến độ giữ yên thời gian thực.
  */
 @Composable
 fun FaceViewfinderHud(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    guidanceMessage: String = "Nhìn thẳng, giữ khuôn mặt đủ sáng",
+    distanceText: String = "Khoảng cách hợp lệ (65 cm) • Độ sáng: Tốt",
+    stabilityProgress: Float = 0f,
+    isAligned: Boolean = false,
+    isUploading: Boolean = false,
+    cameraContent: (@Composable () -> Unit)? = null
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "capture_scan")
     val pulseAlpha by infiniteTransition.animateFloat(
@@ -59,6 +68,13 @@ fun FaceViewfinderHud(
         label = "pulse_alpha"
     )
 
+    val ovalColor = when {
+        isUploading -> Color(0xFF818CF8) // Indigo
+        isAligned && stabilityProgress > 0.5f -> Color(0xFF34D399) // Emerald-400
+        isAligned -> Color(0xFF38BDF8) // Sky-400
+        else -> Color(0xFF38BDF8).copy(alpha = 0.6f)
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -70,7 +86,7 @@ fun FaceViewfinderHud(
                 val strokeWidth = 3.5.dp.toPx()
                 val radius = 8.dp.toPx()
                 val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                val cornerColor = Color(0xFF67E8F9)
+                val cornerColor = if (isAligned && stabilityProgress > 0.6f) Color(0xFF34D399) else Color(0xFF67E8F9)
 
                 // Top-Left
                 val pathTL = Path().apply {
@@ -110,6 +126,11 @@ fun FaceViewfinderHud(
             },
         contentAlignment = Alignment.Center
     ) {
+        // Nền Video CameraX trực tiếp (nếu có)
+        if (cameraContent != null) {
+            cameraContent()
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -130,13 +151,13 @@ fun FaceViewfinderHud(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.CheckCircle,
+                        imageVector = if (isAligned) Icons.Default.CheckCircle else Icons.Default.HourglassTop,
                         contentDescription = null,
-                        tint = EnrollmentColors.TertiaryFixed,
+                        tint = if (isAligned) EnrollmentColors.TertiaryFixed else Color(0xFFFBBF24),
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "Khoảng cách hợp lệ (65 cm) • Độ sáng: Tốt",
+                        text = distanceText,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.White
@@ -151,40 +172,60 @@ fun FaceViewfinderHud(
                     .aspectRatio(0.75f)
                     .drawBehind {
                         drawOval(
-                            color = Color(0xFF38BDF8),
+                            color = ovalColor,
                             style = Stroke(
-                                width = 2.5.dp.toPx(),
+                                width = 3.dp.toPx(),
                                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 12f), 0f)
                             )
                         )
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Face,
-                        contentDescription = null,
-                        tint = Color(0xFF67E8F9).copy(alpha = pulseAlpha),
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "Đưa khuôn mặt vào khung",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Nhìn thẳng, giữ khuôn mặt đủ sáng",
-                        fontSize = 11.5.sp,
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
+                if (isUploading) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF67E8F9),
+                            modifier = Modifier.size(48.dp),
+                            strokeWidth = 3.5.dp
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Đang gửi mẫu AI...",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Face,
+                            contentDescription = null,
+                            tint = ovalColor.copy(alpha = pulseAlpha),
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = if (isAligned) "Giữ yên khuôn mặt" else "Đưa khuôn mặt vào khung",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = guidanceMessage,
+                            fontSize = 11.5.sp,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                    }
                 }
             }
 
-            // Thanh đo chất lượng căn chỉnh
+            // Thanh đo chất lượng căn chỉnh và độ ổn định
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.85f)
@@ -193,21 +234,24 @@ fun FaceViewfinderHud(
                     .border(1.dp, Color(0xFF334155), RoundedCornerShape(12.dp))
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
+                val displayProgress = if (stabilityProgress > 0f) stabilityProgress else if (isAligned) 0.85f else 0.20f
+                val percentText = (displayProgress * 100).toInt()
+
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Chất lượng căn chỉnh",
+                            text = if (stabilityProgress > 0f) "Tiến độ ổn định (Auto-Capture)" else "Chất lượng căn chỉnh",
                             fontSize = 11.sp,
                             color = Color.White.copy(alpha = 0.8f)
                         )
                         Text(
-                            text = "94%",
+                            text = "$percentText%",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = EnrollmentColors.TertiaryFixed
+                            color = if (displayProgress >= 0.8f) EnrollmentColors.TertiaryFixed else Color(0xFFFBBF24)
                         )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
@@ -220,10 +264,10 @@ fun FaceViewfinderHud(
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth(0.94f)
+                                .fillMaxWidth(displayProgress.coerceIn(0f, 1f))
                                 .fillMaxSize()
                                 .clip(RoundedCornerShape(999.dp))
-                                .background(EnrollmentColors.TertiaryFixed)
+                                .background(if (displayProgress >= 0.8f) EnrollmentColors.TertiaryFixed else Color(0xFFFBBF24))
                         )
                     }
                 }

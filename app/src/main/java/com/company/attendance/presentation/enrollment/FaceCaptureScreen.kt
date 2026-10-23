@@ -24,13 +24,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,23 +42,45 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.graphics.Bitmap
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.company.attendance.domain.model.Employee
+import com.company.attendance.presentation.common.components.CameraPreview
 import com.company.attendance.presentation.enrollment.components.EnrollmentTopBar
 import com.company.attendance.presentation.enrollment.components.FaceViewfinderHud
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
 /**
- * Màn hình 4A: Đăng ký khuôn mặt - Chụp mẫu (Face Enrollment Capture - MVVM Refactored)
+ * Màn hình 4A: Đăng ký khuôn mặt - Chụp mẫu (Face Enrollment Capture - Smart Auto-Capture & Multi-Shot MVVM)
  * Node ID: 3bda7a5093d44ab3b6fa20c5d5b06c1e
  */
 @Composable
 fun FaceCaptureScreen(
     employee: Employee,
     onNavigateBack: () -> Unit,
-    onCaptureFace: () -> Unit,
-    modifier: Modifier = Modifier
+    onCaptureFace: (Bitmap?) -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: FaceCaptureViewModel = viewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    val targetEmployeeId = employee.id.ifBlank { employee.code }
+    LaunchedEffect(targetEmployeeId) {
+        viewModel.initEmployee(targetEmployeeId)
+    }
+
+    // Khi đã hoàn tất toàn bộ 3 mẫu (hasFaceSample == true) -> tự động chuyển sang xem lại kèm ảnh thực tế
+    LaunchedEffect(uiState.isCompleted) {
+        if (uiState.isCompleted) {
+            onCaptureFace(uiState.lastCapturedBitmap)
+        }
+    }
+
+
     Surface(
         modifier = modifier
             .fillMaxSize()
@@ -70,7 +96,6 @@ fun FaceCaptureScreen(
             EnrollmentTopBar(
                 title = "TECNIX KIOSK",
                 subtitle = "Đăng ký sinh trắc học",
-                badgeText = "Camera Mode",
                 onNavigateBack = onNavigateBack
             )
 
@@ -102,18 +127,18 @@ fun FaceCaptureScreen(
                                     color = EnrollmentColors.OnSurface
                                 )
                                 Text(
-                                    text = "Bước 1/2: Căn chỉnh và chụp mẫu nhận diện",
+                                    text = "${uiState.stepTitle} (${uiState.sampleCount}/3 mẫu đã lưu)",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = EnrollmentColors.OnSurfaceVariant
                                 )
                             }
 
-                            // Chip camera sẵn sàng
+                            // Chip camera sẵn sàng / Đang gửi
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(999.dp))
-                                    .background(Color(0xFFE8F8F0))
+                                    .background(if (uiState.isUploading) Color(0xFFEFF6FF) else Color(0xFFE8F8F0))
                                     .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
                                 Row(
@@ -124,13 +149,13 @@ fun FaceCaptureScreen(
                                         modifier = Modifier
                                             .size(7.dp)
                                             .clip(CircleShape)
-                                            .background(EnrollmentColors.Tertiary)
+                                            .background(if (uiState.isUploading) Color(0xFF2563EB) else EnrollmentColors.Tertiary)
                                     )
                                     Text(
-                                        text = "CAMERA SẴN SÀNG",
+                                        text = if (uiState.isUploading) "AI ĐANG XỬ LÝ" else "CAMERA SẴN SÀNG",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = EnrollmentColors.Tertiary
+                                        color = if (uiState.isUploading) Color(0xFF2563EB) else EnrollmentColors.Tertiary
                                     )
                                 }
                             }
@@ -224,10 +249,87 @@ fun FaceCaptureScreen(
                             }
                         }
 
+                        // Thông báo lỗi nếu server trả về lỗi
+                        if (uiState.errorMessage != null) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFFEF2F2))
+                                    .border(1.dp, Color(0xFFFECACA), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = Color(0xFFDC2626),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = uiState.errorMessage ?: "",
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color(0xFF991B1B),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Đóng thông báo",
+                                        tint = Color(0xFF991B1B),
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .clip(CircleShape)
+                                            .clickable { viewModel.dismissError() }
+                                    )
+                                }
+
+                                if (uiState.errorMessage?.contains("xóa mẫu", ignoreCase = true) == true) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Bấm để xóa mẫu cũ & chụp lại từ đầu",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFDC2626),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFFFEE2E2))
+                                            .clickable { viewModel.clearOldSamplesAndRetry() }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+
+
+
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // KHUNG NGẮM CAMERA (Camera Viewfinder Stage)
-                        FaceViewfinderHud()
+                        // KHUNG NGẮM CAMERA THỰC TẾ VỚI HUD CÔNG NGHỆ CAO
+                        FaceViewfinderHud(
+                            guidanceMessage = uiState.guidanceText,
+                            distanceText = uiState.distanceText,
+                            stabilityProgress = uiState.stabilityProgress,
+                            isAligned = uiState.isFaceAligned,
+                            isUploading = uiState.isUploading,
+                            cameraContent = {
+                                CameraPreview(
+                                    modifier = Modifier.fillMaxSize(),
+                                    isFrontCamera = true,
+                                    onFaceDetected = { faceData ->
+                                        viewModel.onFaceFrame(faceData)
+                                    },
+                                    onCaptureReady = { provider ->
+                                        viewModel.setBitmapProvider(provider)
+                                    }
+                                )
+                            }
+                        )
 
                         Spacer(modifier = Modifier.height(16.dp))
 
@@ -237,24 +339,40 @@ fun FaceCaptureScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Button(
-                                onClick = onCaptureFace,
+                                onClick = { viewModel.triggerCapture() },
+                                enabled = !uiState.isUploading,
                                 modifier = Modifier
                                     .weight(1.5f)
                                     .height(50.dp),
                                 shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = EnrollmentColors.PrimaryContainer)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.PhotoCamera,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Chụp mẫu khuôn mặt",
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                if (uiState.isUploading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Đang lưu mẫu...",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.PhotoCamera,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Chụp mẫu khuôn mặt (${uiState.sampleCount}/3)",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
 
                             OutlinedButton(
@@ -297,7 +415,7 @@ fun FaceCaptureScreen(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
-                                    text = "Dữ liệu khuôn mặt được mã hóa vector 512-dim an toàn theo chuẩn bảo mật sinh trắc học TECNIX.",
+                                    text = "Hệ thống tự động chụp khi bạn giữ yên khuôn mặt 1.2s. Cần đủ 3 mẫu để kích hoạt nhận diện.",
                                     fontSize = 11.5.sp,
                                     color = EnrollmentColors.OnSurfaceVariant
                                 )

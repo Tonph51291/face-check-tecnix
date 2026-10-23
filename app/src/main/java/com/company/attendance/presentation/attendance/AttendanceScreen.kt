@@ -284,6 +284,7 @@ fun AttendanceScreen(
             val employeeId = uiState.selectedEmployeeId ?: activeEmployee.code.ifBlank { activeEmployee.id }
             EmployeeDetailScreen(
                 employeeId = employeeId,
+                capturedBitmap = uiState.capturedBitmap,
                 onNavigateBack = {
                     viewModel.onEvent(AttendanceUiEvent.OnNavigateToScreen(KioskScreen.EMPLOYEE_SEARCH))
                 },
@@ -299,8 +300,8 @@ fun AttendanceScreen(
                 onNavigateBack = {
                     viewModel.onEvent(AttendanceUiEvent.OnNavigateToScreen(KioskScreen.EMPLOYEE_DETAIL))
                 },
-                onCaptureFace = {
-                    viewModel.onEvent(AttendanceUiEvent.OnCaptureFaceSample)
+                onCaptureFace = { bitmap ->
+                    viewModel.onEvent(AttendanceUiEvent.OnCaptureFaceSample(bitmap))
                 }
             )
         }
@@ -308,11 +309,16 @@ fun AttendanceScreen(
         KioskScreen.FACE_REVIEW -> {
             FaceReviewScreen(
                 employee = activeEmployee,
+                capturedBitmap = uiState.capturedBitmap,
                 onNavigateBack = {
                     viewModel.onEvent(AttendanceUiEvent.OnNavigateToScreen(KioskScreen.EMPLOYEE_DETAIL))
                 },
                 onRetakeSample = {
-                    viewModel.onEvent(AttendanceUiEvent.OnNavigateToScreen(KioskScreen.FACE_CAPTURE))
+                    viewModel.onEvent(
+                        AttendanceUiEvent.OnRetakeFaceEnrollment(
+                            activeEmployee.id.ifBlank { activeEmployee.code }
+                        )
+                    )
                 },
                 onConfirmEnrollment = { empId ->
                     viewModel.onEvent(AttendanceUiEvent.OnConfirmEnrollment(empId))
