@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
 /**
- * Ô tìm kiếm thời gian thực chuẩn thiết kế Stitch
+ * Thanh tìm kiếm chuẩn Stitch (rounded-2xl, border-slate-200/90, placeholder-slate-400).
  */
 @Composable
 fun SearchInputBox(
@@ -43,11 +43,11 @@ fun SearchInputBox(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(52.dp)
-            .shadow(elevation = 2.dp, shape = RoundedCornerShape(14.dp))
-            .clip(RoundedCornerShape(14.dp))
+            .height(50.dp)
+            .shadow(elevation = 1.dp, shape = RoundedCornerShape(16.dp), spotColor = Color(0x0F0F172A))
+            .clip(RoundedCornerShape(16.dp))
             .background(Color.White)
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
+            .border(1.dp, EnrollmentColors.OutlineVariant.copy(alpha = 0.9f), RoundedCornerShape(16.dp))
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.CenterStart
     ) {
@@ -59,7 +59,7 @@ fun SearchInputBox(
                 imageVector = Icons.Default.Search,
                 contentDescription = "Tìm kiếm",
                 tint = EnrollmentColors.Outline,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(18.dp)
             )
 
             Spacer(modifier = Modifier.width(10.dp))
@@ -67,9 +67,9 @@ fun SearchInputBox(
             Box(modifier = Modifier.weight(1f)) {
                 if (query.isEmpty()) {
                     Text(
-                        text = "Nhập tên, mã nhân viên hoặc phòng ban...",
-                        fontSize = 14.sp,
-                        color = EnrollmentColors.Outline.copy(alpha = 0.7f)
+                        text = "Nhập tên, mã NV hoặc phòng ban...",
+                        fontSize = 13.5.sp,
+                        color = EnrollmentColors.Outline
                     )
                 }
                 BasicTextField(
@@ -77,7 +77,7 @@ fun SearchInputBox(
                     onValueChange = onQueryChange,
                     singleLine = true,
                     textStyle = TextStyle(
-                        fontSize = 14.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium,
                         color = EnrollmentColors.OnSurface
                     ),
@@ -89,13 +89,13 @@ fun SearchInputBox(
             if (query.isNotEmpty()) {
                 IconButton(
                     onClick = { onQueryChange("") },
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(28.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Xóa",
-                        tint = EnrollmentColors.OnSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
+                        contentDescription = "Xóa tìm kiếm",
+                        tint = EnrollmentColors.Outline,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }

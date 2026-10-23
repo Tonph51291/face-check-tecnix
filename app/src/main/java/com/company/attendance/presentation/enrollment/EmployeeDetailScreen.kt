@@ -1,9 +1,9 @@
 package com.company.attendance.presentation.enrollment
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,12 +33,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.company.attendance.domain.model.Employee
+import com.company.attendance.domain.model.EmployeeDetail
 import com.company.attendance.presentation.enrollment.components.AttendanceHistoryCard
 import com.company.attendance.presentation.enrollment.components.BiometricStatusSpotlightCard
 import com.company.attendance.presentation.enrollment.components.EnrollmentTopBar
@@ -46,14 +47,11 @@ import com.company.attendance.presentation.enrollment.components.ProfileOverview
 import com.company.attendance.presentation.enrollment.components.ShiftPolicyCard
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
-import android.graphics.Bitmap
-
 /**
- * Màn hình: Chi tiết nhân viên chuẩn Stitch (MVVM Refactored & Recomposition Optimized)
- * Node ID: 5333fc82baf84cbfba770a02d79fbc86
- *
- * Chỉ nhận mã định danh `employeeId: String` (rất nhẹ, vài bytes), tự động gọi API lấy dữ liệu chi tiết.
- * Giữ nguyên 100% thiết kế giao diện, layout và màu sắc.
+ * Màn hình Chi tiết nhân sự Kiosk chuẩn Stitch:
+ * - Tối ưu RAM: Sử dụng Single ViewModel + LRU Cache ở tầng Repository.
+ * - Phản hồi 0ms: Nếu hồ sơ đã có trong LRU Cache, hiển thị tức thì không cần tải lại.
+ * - Responsive: Tự động căn giữa cân đối trên màn hình lớn (Kiosk/Tablet) và full width trên Mobile.
  */
 @Composable
 fun EmployeeDetailScreen(
@@ -62,29 +60,25 @@ fun EmployeeDetailScreen(
     onStartFaceCapture: () -> Unit,
     modifier: Modifier = Modifier,
     capturedBitmap: Bitmap? = null,
-    viewModel: EmployeeDetailViewModel = viewModel(key = employeeId)
+    viewModel: EmployeeDetailViewModel = viewModel()
 ) {
-    // 1. Kích hoạt gọi API bằng ID (tải mới dữ liệu mỗi khi mở màn hình)
+    // 1. Kích hoạt lấy dữ liệu (tự động dùng LRU Cache nếu có, không ép gọi mạng)
     LaunchedEffect(employeeId) {
-        viewModel.loadEmployeeDetail(employeeId, forceRefresh = true)
+        viewModel.loadEmployeeDetail(employeeId, forceRefresh = false)
     }
 
     // 2. Thu thập UI State
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // 3. Ổn định lambda callbacks
+    // 3. Ổn định callback
     val onNavigateBackStable = remember(onNavigateBack) { onNavigateBack }
     val onStartFaceCaptureStable = remember(onStartFaceCapture) { onStartFaceCapture }
 
     EmployeeDetailContent(
-        employee = uiState.employee,
+        detail = uiState.detail,
         capturedBitmap = capturedBitmap,
         isLoading = uiState.isLoading,
         errorMessage = uiState.errorMessage,
-        shiftName = uiState.shiftName,
-        shiftTimeRange = uiState.shiftTimeRange,
-        allowedLateMinutes = uiState.allowedLateMinutes,
-        recentAttendance = uiState.recentAttendance,
         onNavigateBack = onNavigateBackStable,
         onStartFaceCapture = onStartFaceCaptureStable,
         onRetry = { viewModel.refresh() },
@@ -94,24 +88,22 @@ fun EmployeeDetailScreen(
 
 /**
  * Stateless Content Composable:
- * Toàn bộ tham số đều là kiểu dữ liệu @Immutable, Primitive hoặc Stable Lambda.
- * Compose Compiler tự động bỏ qua Re-render nếu dữ liệu không thay đổi.
+ * Toàn bộ tham số đều là kiểu @Immutable hoặc stable lambda, tối ưu Smart Recomposition.
  */
 @Composable
 fun EmployeeDetailContent(
-    employee: Employee?,
+    detail: EmployeeDetail?,
     capturedBitmap: Bitmap? = null,
     isLoading: Boolean,
     errorMessage: String?,
-    shiftName: String,
-    shiftTimeRange: String,
-    allowedLateMinutes: Int,
-    recentAttendance: List<AttendanceHistoryItem>,
     onNavigateBack: () -> Unit,
     onStartFaceCapture: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val employee = detail?.employee
+    val shift = detail?.shift
+    val recentAttendance = detail?.recentAttendance ?: emptyList()
 
     Surface(
         modifier = modifier
@@ -124,27 +116,27 @@ fun EmployeeDetailContent(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. TOP APP BAR (Giữ nguyên 100% giao diện)
+            // 1. TOP APP BAR
             EnrollmentTopBar(
                 title = "TECNIX KIOSK",
                 subtitle = "Hồ sơ nhân sự sinh trắc học",
-                badgeText = "Employee Details",
                 onNavigateBack = onNavigateBack
             )
 
-            // 2. NỘI DUNG CUỘN THÔNG TIN CHI TIẾT
-            Column(
+            // 2. NỘI DUNG CUỘN RESPONSIVE
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.TopCenter
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .widthIn(max = 760.dp)
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .widthIn(max = 680.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     // Thông báo lỗi nếu gọi API thất bại
                     if (errorMessage != null) {
@@ -152,8 +144,8 @@ fun EmployeeDetailContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(EnrollmentColors.Error.copy(alpha = 0.12f))
-                                .border(1.dp, EnrollmentColors.Error.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .background(EnrollmentColors.ErrorContainer)
+                                .border(1.dp, EnrollmentColors.WarningTagBorder, RoundedCornerShape(12.dp))
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -167,7 +159,7 @@ fun EmployeeDetailContent(
                             Text(
                                 text = errorMessage,
                                 fontSize = 12.sp,
-                                color = EnrollmentColors.Error,
+                                color = EnrollmentColors.OnErrorContainer,
                                 modifier = Modifier.weight(1f)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -175,10 +167,10 @@ fun EmployeeDetailContent(
                                 text = "Thử lại",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = EnrollmentColors.Primary,
+                                color = EnrollmentColors.PrimaryDark,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(EnrollmentColors.Primary.copy(alpha = 0.15f))
+                                    .background(EnrollmentColors.PrimaryLight)
                                     .clickable { onRetry() }
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
                             )
@@ -187,7 +179,7 @@ fun EmployeeDetailContent(
                     }
 
                     if (employee == null && isLoading) {
-                        // Trạng thái đang tải dữ liệu từ Backend
+                        // Trạng thái đang tải dữ liệu lần đầu
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -200,7 +192,7 @@ fun EmployeeDetailContent(
                                     color = EnrollmentColors.Primary,
                                     strokeWidth = 3.dp
                                 )
-                                Spacer(modifier = Modifier.height(12.dp))
+                                Spacer(modifier = Modifier.height(14.dp))
                                 Text(
                                     text = "Đang tải hồ sơ nhân sự từ máy chủ AI...",
                                     fontSize = 13.sp,
@@ -209,17 +201,15 @@ fun EmployeeDetailContent(
                             }
                         }
                     } else if (employee != null) {
-                        // 1. Thẻ thông tin nhân viên tổng quan (Hiển thị ảnh mặt thực tế sau khi đăng ký)
+                        // 1. Thẻ thông tin nhân viên tổng quan (Ảnh chụp thực tế sau đăng ký nếu có)
                         ProfileOverviewCard(
                             employee = employee,
                             capturedBitmap = capturedBitmap
                         )
 
-
-
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // 2. Thẻ Trọng Tâm: Dữ liệu sinh trắc học khuôn mặt
+                        // 2. Thẻ Trọng Tâm: Trạng thái & Quản lý mẫu khuôn mặt sinh trắc học
                         BiometricStatusSpotlightCard(
                             employee = employee,
                             onStartFaceCapture = onStartFaceCapture
@@ -227,21 +217,34 @@ fun EmployeeDetailContent(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // 3. Thẻ Thông tin vị trí & Quy định ca làm việc (Cập nhật từ API)
+                        // 3. Thẻ Thông tin vị trí & Quy định ca làm việc
                         ShiftPolicyCard(
-                            shiftName = shiftName,
-                            timeRange = shiftTimeRange,
-                            allowedLateMinutes = allowedLateMinutes
+                            shiftName = shift?.name ?: "Ca tiêu chuẩn",
+                            timeRange = shift?.timeRange ?: "08:30 - 17:30",
+                            allowedLateMinutes = shift?.allowedLateMinutes ?: 15,
+                            assignedKiosk = shift?.assignedKiosk ?: "Kiosk Cổng 1"
                         )
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        // 4. Lịch sử chấm công gần đây (Chỉ hiển thị khi nhân viên đã có dữ liệu chấm công)
+                        if (recentAttendance.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            AttendanceHistoryCard(
+                                historyItems = recentAttendance
+                            )
+                        }
 
-                        // 4. Lịch sử chấm công gần đây (Cập nhật từ API)
-                        AttendanceHistoryCard(
-                            historyItems = recentAttendance
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        // Home Bar Indicator (Chuẩn Stitch footer)
+                        Box(
+                            modifier = Modifier
+                                .width(128.dp)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Color(0xFFCBD5E1))
                         )
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                     }
                 }
             }

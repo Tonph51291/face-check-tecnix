@@ -1,6 +1,7 @@
 package com.company.attendance.presentation.enrollment.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,22 +30,23 @@ import androidx.compose.ui.unit.sp
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
 /**
- * Top App Bar chuẩn Stitch dùng chung cho các màn hình luồng đăng ký nhân sự.
+ * Top App Bar chuẩn thiết kế Stitch cho luồng Kiosk.
+ * Header nền trắng với viền Slate-100, nút quay lại bo tròn 12dp và Avatar quản trị viên.
  */
 @Composable
 fun EnrollmentTopBar(
     title: String = "TECNIX KIOSK",
-    subtitle: String = "Hệ thống chấm công khuôn mặt",
-    badgeText: String? = null,
+    subtitle: String = "Hệ thống nhận diện & đăng ký khuôn mặt",
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(EnrollmentColors.Surface.copy(alpha = 0.96f))
-            .shadow(elevation = 2.dp, spotColor = Color.Black.copy(alpha = 0.05f))
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .background(Color.White)
+            .shadow(elevation = 1.dp, spotColor = Color(0x0F0F172A))
+            .border(width = 1.dp, color = EnrollmentColors.BorderLight)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         Row(
             modifier = Modifier
@@ -59,25 +61,27 @@ fun EnrollmentTopBar(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f, fill = false)
             ) {
+                // Nút quay lại bo góc 12dp
                 IconButton(
                     onClick = onNavigateBack,
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(40.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(EnrollmentColors.SurfaceContainerLow)
+                        .background(EnrollmentColors.Surface)
+                        .border(1.dp, EnrollmentColors.OutlineVariant.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Quay lại",
                         tint = EnrollmentColors.OnSurface,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
                 Column {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
                             text = title,
@@ -86,40 +90,27 @@ fun EnrollmentTopBar(
                             color = EnrollmentColors.OnSurface,
                             letterSpacing = (-0.2).sp
                         )
-                        if (badgeText != null) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(EnrollmentColors.SurfaceContainerHigh)
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = badgeText,
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = EnrollmentColors.Primary
-                                )
-                            }
-                        }
                     }
                     Text(
                         text = subtitle,
                         fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
                         color = EnrollmentColors.OnSurfaceVariant
                     )
                 }
             }
 
+            // Avatar quản trị viên
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
                     .background(EnrollmentColors.Primary),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Person,
-                    contentDescription = "Tài khoản",
+                    contentDescription = "Tài khoản quản trị",
                     tint = Color.White,
                     modifier = Modifier.size(20.dp)
                 )

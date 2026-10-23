@@ -27,7 +27,7 @@ interface EmployeeApi {
         @Query("query") query: String? = null,
         @Query("department") department: String? = null,
         @Query("page") page: Int = 1,
-        @Query("limit") limit: Int = 50
+        @Query("limit") limit: Int = 20
     ): Response<EmployeeListResponseDto>
 
     /**

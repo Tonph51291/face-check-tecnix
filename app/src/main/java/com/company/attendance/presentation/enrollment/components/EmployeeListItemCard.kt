@@ -12,13 +12,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,7 +35,11 @@ import com.company.attendance.domain.model.Employee
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
 /**
- * Thẻ hiển thị từng nhân viên (Employee Item Card)
+ * Thẻ nhân viên chuẩn Stitch (rounded-2xl, border-slate-200/70, shadow-card).
+ * - Avatar: Bo góc 12dp, gradient chuyển màu hiện đại, chữ cái viết tắt.
+ * - Mã NV: Chip blue-50 viền blue-100.
+ * - Tag trạng thái: Emerald (Đã có mẫu mặt) hoặc Rose (Chưa có mẫu mặt).
+ * - Nút xem chi tiết: Bo tròn 36dp viền slate-200/50.
  */
 @Composable
 fun EmployeeListItemCard(
@@ -43,26 +47,33 @@ fun EmployeeListItemCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val avatarBg = when (employee.avatarColorIndex % 4) {
-        0 -> Color(0xFF2457C5)
-        1 -> Color(0xFF809FFE)
-        2 -> Color(0xFF006D41)
-        else -> Color(0xFF7C3AED)
+    val gradientIndex = (employee.avatarColorIndex.takeIf { it >= 0 }
+        ?: employee.name.hashCode().let { kotlin.math.abs(it) }) % EnrollmentColors.AvatarGradients.size
+    val avatarGradient = EnrollmentColors.AvatarGradients[gradientIndex]
+
+    val initials = employee.avatarInitials.ifBlank {
+        val parts = employee.name.trim().split(" ")
+        if (parts.size >= 2) {
+            "${parts.first().firstOrNull()?.uppercaseChar() ?: ""}${parts.last().firstOrNull()?.uppercaseChar() ?: ""}"
+        } else {
+            employee.name.take(2).uppercase()
+        }
     }
 
-    val avatarTextColor = when (employee.avatarColorIndex % 4) {
-        1 -> Color(0xFF001849)
-        else -> Color.White
+    val cardBorderColor = if (!employee.hasFaceSample) {
+        EnrollmentColors.WarningTagBorder.copy(alpha = 0.6f)
+    } else {
+        EnrollmentColors.OutlineVariant.copy(alpha = 0.7f)
     }
 
     Box(
         modifier = modifier
-            .shadow(elevation = 1.5.dp, shape = RoundedCornerShape(16.dp))
+            .shadow(elevation = 1.dp, shape = RoundedCornerShape(16.dp), spotColor = Color(0x0A0F172A))
             .clip(RoundedCornerShape(16.dp))
             .background(Color.White)
-            .border(1.dp, Color(0xFFF1F5F9), RoundedCornerShape(16.dp))
+            .border(1.dp, cardBorderColor, RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-            .padding(14.dp)
+            .padding(16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -71,22 +82,22 @@ fun EmployeeListItemCard(
         ) {
             Row(
                 modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Avatar chữ viết tắt
+                // Avatar chữ cái với gradient hiện đại (rounded-xl 12dp)
                 Box(
                     modifier = Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(avatarBg),
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(avatarGradient),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = employee.avatarInitials.ifBlank { employee.name.take(2).uppercase() },
-                        fontSize = 16.sp,
+                        text = initials,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = avatarTextColor,
+                        color = Color.White,
                         letterSpacing = 0.5.sp
                     )
                 }
@@ -105,75 +116,79 @@ fun EmployeeListItemCard(
                             overflow = TextOverflow.Ellipsis
                         )
 
-                        // Mã nhân viên
+                        // Chip mã nhân viên (bg-blue-50 text-brand-700 border-blue-100)
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(EnrollmentColors.SurfaceContainerHigh)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(EnrollmentColors.PrimaryLight)
+                                .border(1.dp, EnrollmentColors.PrimaryBorder, RoundedCornerShape(6.dp))
                                 .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = employee.code,
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EnrollmentColors.Primary
+                                fontWeight = FontWeight.SemiBold,
+                                color = EnrollmentColors.PrimaryDark
                             )
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(2.dp))
+
                     Text(
                         text = employee.department,
-                        fontSize = 12.5.sp,
+                        fontSize = 12.sp,
                         color = EnrollmentColors.OnSurfaceVariant,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 1.dp)
+                        overflow = TextOverflow.Ellipsis
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Tag trạng thái mẫu khuôn mặt
                     if (employee.hasFaceSample) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
                             modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
+                                .clip(CircleShape)
                                 .background(EnrollmentColors.SuccessTagBg)
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                .border(1.dp, EnrollmentColors.SuccessTagBorder, CircleShape)
+                                .padding(horizontal = 9.dp, vertical = 2.5.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.CheckCircle,
+                                imageVector = Icons.Default.Check,
                                 contentDescription = null,
-                                tint = EnrollmentColors.SuccessTagText,
+                                tint = EnrollmentColors.SuccessIcon,
                                 modifier = Modifier.size(13.dp)
                             )
                             Text(
                                 text = "Đã có mẫu mặt",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Medium,
                                 color = EnrollmentColors.SuccessTagText
                             )
                         }
                     } else {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
                             modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
+                                .clip(CircleShape)
                                 .background(EnrollmentColors.WarningTagBg)
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                .border(1.dp, EnrollmentColors.WarningTagBorder, CircleShape)
+                                .padding(horizontal = 9.dp, vertical = 2.5.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Warning,
+                                imageVector = Icons.Default.WarningAmber,
                                 contentDescription = null,
-                                tint = EnrollmentColors.WarningTagText,
+                                tint = EnrollmentColors.WarningIcon,
                                 modifier = Modifier.size(13.dp)
                             )
                             Text(
                                 text = "Chưa có mẫu mặt",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Medium,
                                 color = EnrollmentColors.WarningTagText
                             )
                         }
@@ -181,19 +196,22 @@ fun EmployeeListItemCard(
                 }
             }
 
-            // Nút mũi tên chuyển tiếp
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Nút mũi tên chuyển tiếp tròn 36dp
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
-                    .background(EnrollmentColors.SurfaceContainerLow),
+                    .background(EnrollmentColors.Surface)
+                    .border(1.dp, EnrollmentColors.OutlineVariant.copy(alpha = 0.5f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "Chọn",
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                    contentDescription = "Xem chi tiết",
                     tint = EnrollmentColors.Outline,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(14.dp)
                 )
             }
         }

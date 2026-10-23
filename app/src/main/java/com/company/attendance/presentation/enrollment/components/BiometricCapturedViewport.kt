@@ -1,5 +1,7 @@
 package com.company.attendance.presentation.enrollment.components
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -10,40 +12,37 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.graphics.Bitmap
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import com.company.attendance.domain.model.Employee
-import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
 /**
- * Khung hình ảnh mẫu đã chụp với overlay HUD sinh trắc học và thông tin nhân viên
+ * Thẻ xem trước hình ảnh mẫu sinh trắc học đã chụp chuẩn Stitch (FacialPreviewCard):
+ * - Thẻ bo góc 24dp (rounded-3xl), viền Slate-200/70, nền trắng.
+ * - Khung ảnh bo góc 16dp với tỉ lệ 4:4.2.
+ * - 2 Floating Glassmorphism Pills: "512-Vector Khớp" và "AES-256 Mã hóa".
+ * - Thông tin nhân sự: Avatar chữ cái đầu, Tên, Mã NV, Phòng ban và Icon xác thực vân tay/sinh trắc ngọc lục bảo.
  */
 @Composable
 fun BiometricCapturedViewport(
@@ -51,212 +50,195 @@ fun BiometricCapturedViewport(
     capturedBitmap: Bitmap? = null,
     modifier: Modifier = Modifier
 ) {
-
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 2.dp, shape = RoundedCornerShape(20.dp))
-            .clip(RoundedCornerShape(20.dp))
+            .shadow(elevation = 1.5.dp, shape = RoundedCornerShape(24.dp), spotColor = Color(0x0F000000))
+            .clip(RoundedCornerShape(24.dp))
             .background(Color.White)
-            .border(1.dp, Color(0xFFEDF0FF), RoundedCornerShape(20.dp))
-            .padding(16.dp),
-        contentAlignment = Alignment.Center
+            .border(width = 1.dp, color = Color(0xFFE2E8F0), shape = RoundedCornerShape(24.dp))
+            .padding(14.dp)
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Khung ảnh khuôn mặt công nghệ cao
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Khung ảnh khuôn mặt
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .aspectRatio(1.15f)
+                    .fillMaxWidth()
+                    .aspectRatio(4f / 4.2f)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF0F172A))
-                    .drawBehind {
-                        // 4 Corner HUD Precision Brackets
-                        val cornerLength = 22.dp.toPx()
-                        val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                        val cornerColor = Color(0xFF38BDF8)
-
-                        // Top-Left
-                        val pathTL = Path().apply {
-                            moveTo(12.dp.toPx(), 12.dp.toPx() + cornerLength)
-                            lineTo(12.dp.toPx(), 12.dp.toPx())
-                            lineTo(12.dp.toPx() + cornerLength, 12.dp.toPx())
-                        }
-                        drawPath(pathTL, cornerColor, style = stroke)
-
-                        // Top-Right
-                        val pathTR = Path().apply {
-                            moveTo(size.width - 12.dp.toPx() - cornerLength, 12.dp.toPx())
-                            lineTo(size.width - 12.dp.toPx(), 12.dp.toPx())
-                            lineTo(size.width - 12.dp.toPx(), 12.dp.toPx() + cornerLength)
-                        }
-                        drawPath(pathTR, cornerColor, style = stroke)
-
-                        // Bottom-Left
-                        val pathBL = Path().apply {
-                            moveTo(12.dp.toPx(), size.height - 12.dp.toPx() - cornerLength)
-                            lineTo(12.dp.toPx(), size.height - 12.dp.toPx())
-                            lineTo(12.dp.toPx() + cornerLength, size.height - 12.dp.toPx())
-                        }
-                        drawPath(pathBL, cornerColor, style = stroke)
-
-                        // Bottom-Right
-                        val pathBR = Path().apply {
-                            moveTo(size.width - 12.dp.toPx() - cornerLength, size.height - 12.dp.toPx())
-                            lineTo(size.width - 12.dp.toPx(), size.height - 12.dp.toPx())
-                            lineTo(size.width - 12.dp.toPx(), size.height - 12.dp.toPx() - cornerLength)
-                        }
-                        drawPath(pathBR, cornerColor, style = stroke)
-
-                        // Center Oval Tracking Outline
-                        drawOval(
-                            color = Color(0xFF22D3EE).copy(alpha = 0.5f),
-                            style = Stroke(
-                                width = 2.dp.toPx(),
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f)
-                            )
-                        )
-                    },
+                    .background(Color(0xFFF1F5F9)), // slate-100
                 contentAlignment = Alignment.Center
             ) {
                 if (capturedBitmap != null) {
                     Image(
                         bitmap = capturedBitmap.asImageBitmap(),
-                        contentDescription = null,
+                        contentDescription = "Mẫu khuôn mặt đã chụp",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Icon(
-                        imageVector = Icons.Default.Face,
-                        contentDescription = null,
-                        tint = Color(0xFF67E8F9).copy(alpha = 0.85f),
-                        modifier = Modifier.size(80.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF0F172A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Face,
+                            contentDescription = null,
+                            tint = Color(0xFF67E8F9).copy(alpha = 0.8f),
+                            modifier = Modifier.size(80.dp)
+                        )
+                    }
                 }
 
-                // Floating Metadata Pills ở chân ảnh
+                // Tech Specs Pill Badges (Glassmorphism hiệu ứng mờ kính nổi)
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Badge 1: 512-Vector Khớp
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFF0F172A).copy(alpha = 0.80f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xCC0F172A)) // glass-pill rgba(15, 23, 42, 0.65-0.8)
+                            .border(width = 1.dp, color = Color(0x26FFFFFF), shape = RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(6.dp)
+                                    .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(EnrollmentColors.TertiaryFixed)
+                                    .background(Color(0xFF34D399)) // emerald-400
                             )
                             Text(
                                 text = "512-Vector Khớp",
-                                fontSize = 10.5.sp,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
                                 color = Color.White
                             )
                         }
                     }
 
+                    // Badge 2: AES-256 Mã hóa
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFF0F172A).copy(alpha = 0.80f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xCC0F172A))
+                            .border(width = 1.dp, color = Color(0x26FFFFFF), shape = RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        Text(
-                            text = "AES-256 Mã hóa",
-                            fontSize = 10.5.sp,
-                            color = Color.White
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFF93C5FD), // blue-300
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "AES-256 Mã hóa",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Thanh danh tính nhân viên
+            // Footer: User Information & Biometric Verification Icon
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
+                    // Initial Avatar
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .clip(CircleShape)
-                            .background(EnrollmentColors.SurfaceContainerLow),
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFFEFF6FF)) // brand-50
+                            .border(width = 1.dp, color = Color(0xFFDBEAFE), shape = RoundedCornerShape(16.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = employee.avatarInitials.ifBlank { employee.name.take(2).uppercase() },
-                            fontSize = 15.sp,
+                            text = employee.avatarInitials.ifBlank { employee.name.take(1).uppercase() },
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = EnrollmentColors.Primary
+                            color = Color(0xFF2563EB) // brand-600
                         )
                     }
 
                     Column {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
                                 text = employee.name,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = EnrollmentColors.OnSurface
+                                color = Color(0xFF0F172A) // slate-900
                             )
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(EnrollmentColors.SurfaceContainerHigh)
-                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFEFF6FF)) // blue-50
+                                    .border(width = 1.dp, color = Color(0xFFDBEAFE), shape = RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = employee.code,
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EnrollmentColors.Primary
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF2563EB)
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = employee.department,
                             fontSize = 12.sp,
-                            color = EnrollmentColors.OnSurfaceVariant
+                            fontWeight = FontWeight.Normal,
+                            color = Color(0xFF64748B) // slate-500
                         )
                     }
                 }
 
+                // Biometric Verification Icon (Emerald)
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(EnrollmentColors.SurfaceContainer),
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFECFDF5)) // emerald-50
+                        .border(width = 1.dp, color = Color(0xFFA7F3D0), shape = RoundedCornerShape(14.dp)), // emerald-200
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Fingerprint,
-                        contentDescription = null,
-                        tint = EnrollmentColors.Tertiary,
-                        modifier = Modifier.size(20.dp)
+                        contentDescription = "Đã xác minh sinh trắc",
+                        tint = Color(0xFF059669), // emerald-600
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }

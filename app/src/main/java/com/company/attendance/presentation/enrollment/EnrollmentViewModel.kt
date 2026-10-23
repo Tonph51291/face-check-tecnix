@@ -2,81 +2,64 @@ package com.company.attendance.presentation.enrollment
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.company.attendance.core.result.Result
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import com.company.attendance.di.RepositoryModule
-import com.company.attendance.domain.usecase.SearchEmployeeUseCase
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import com.company.attendance.domain.model.Employee
+import com.company.attendance.domain.usecase.ListEmployeeUseCase
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 
 /**
- * ViewModel chuyên biệt cho màn hình Tìm kiếm nhân sự Kiosk.
- * Tương tác trực tiếp với Backend FaceCheck AI Service qua SearchEmployeeUseCase.
+ * ViewModel chuyên biệt cho màn hình Danh sách nhân sự Kiosk.
+ * Sử dụng Jetpack Paging 3 + cachedIn(viewModelScope) để:
+ * 1. Phân trang theo nhu cầu từ Backend AI Server.
+ * 2. Lưu cache trong vòng đời ViewModel, không load lại khi recompose / xoay màn hình.
+ * 3. Tự động giải phóng (evict) các trang nằm ngoài tầm nhìn, ngăn ngừa phình to RAM.
  */
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class EnrollmentViewModel(
-    private val searchEmployeeUseCase: SearchEmployeeUseCase = SearchEmployeeUseCase(RepositoryModule.employeeRepository)
+    private val listEmployeeUseCase: ListEmployeeUseCase = ListEmployeeUseCase(RepositoryModule.employeeRepository)
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(EnrollmentUiState())
     val uiState: StateFlow<EnrollmentUiState> = _uiState.asStateFlow()
 
-    private var searchJob: Job? = null
-
-    init {
-        loadEmployees(debounceMs = 0)
+    val employeesPagingFlow: Flow<PagingData<Employee>> = combine(
+        _uiState.map { it.searchQuery }.distinctUntilChanged().debounce { if (it.isEmpty()) 0L else 300L },
+        _uiState.map { it.selectedDepartment }.distinctUntilChanged()
+    ) { query, dept ->
+        Pair(query, dept)
     }
+        .distinctUntilChanged()
+        .flatMapLatest { (query, dept) ->
+            listEmployeeUseCase(query = query, department = dept)
+        }
+        .cachedIn(viewModelScope)
 
     fun onEvent(event: EnrollmentUiEvent) {
         when (event) {
             is EnrollmentUiEvent.OnSearchQueryChanged -> {
                 _uiState.update { it.copy(searchQuery = event.query) }
-                loadEmployees(debounceMs = 300)
             }
             is EnrollmentUiEvent.OnSelectDepartment -> {
                 _uiState.update { it.copy(selectedDepartment = event.department) }
-                loadEmployees(debounceMs = 0)
             }
             is EnrollmentUiEvent.OnClearSearch -> {
                 _uiState.update { it.copy(searchQuery = "") }
-                loadEmployees(debounceMs = 0)
             }
             is EnrollmentUiEvent.OnRefresh -> {
-                loadEmployees(debounceMs = 0)
-            }
-        }
-    }
-
-    private fun loadEmployees(debounceMs: Long = 0) {
-        searchJob?.cancel()
-        searchJob = viewModelScope.launch {
-            if (debounceMs > 0) {
-                delay(debounceMs)
-            }
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val query = _uiState.value.searchQuery
-            val dept = _uiState.value.selectedDepartment
-            when (val result = searchEmployeeUseCase(query = query, department = dept)) {
-                is Result.Success -> {
-                    _uiState.update {
-                        it.copy(
-                            filteredEmployees = result.data,
-                            isLoading = false,
-                            errorMessage = null
-                        )
-                    }
-                }
-                is Result.Error -> {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = result.error.message
-                        )
-                    }
-                }
+                // UI sẽ gọi trực tiếp lazyPagingItems.refresh()
             }
         }
     }
