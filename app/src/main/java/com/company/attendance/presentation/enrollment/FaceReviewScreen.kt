@@ -71,7 +71,8 @@ fun FaceReviewScreen(
     onRetakeSample: () -> Unit,
     onConfirmEnrollment: (String) -> Unit,
     modifier: Modifier = Modifier,
-    capturedBitmap: Bitmap? = null
+    capturedBitmap: Bitmap? = null,
+    qualityMetrics: com.company.attendance.domain.model.FaceQualityMetrics = com.company.attendance.domain.model.FaceQualityMetrics()
 ) {
     var isSaving by remember { mutableStateOf(false) }
 
@@ -108,33 +109,38 @@ fun FaceReviewScreen(
                         .padding(horizontal = 18.dp, vertical = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // LƯỚI 3 THẺ CHỈ SỐ CHẤT LƯỢNG (Quality Metrics 3-Grid)
+                    // LƯỚI 3 THẺ CHỈ SỐ CHẤT LƯỢNG THỰC TẾ (Quality Metrics 3-Grid)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        // Thẻ 1: Độ sắc nét (Laplacian Variance)
                         QualityMetricBox(
                             label = "Độ sắc nét",
-                            value = "98%",
-                            status = "Tối ưu",
+                            value = "${qualityMetrics.sharpnessPercent}%",
+                            status = qualityMetrics.sharpnessStatus,
                             icon = Icons.Default.CenterFocusStrong,
-                            iconColor = Color(0xFF059669), // emerald-600
+                            iconColor = if (qualityMetrics.sharpnessPercent >= 75) Color(0xFF059669) else Color(0xFFE11D48),
                             modifier = Modifier.weight(1f)
                         )
+
+                        // Thẻ 2: Ánh sáng quang học thực tế
                         QualityMetricBox(
                             label = "Ánh sáng",
-                            value = "Đạt",
-                            status = "320 Lux",
+                            value = qualityMetrics.lightStatus,
+                            status = "${qualityMetrics.lightLux} Lux",
                             icon = Icons.Default.WbSunny,
-                            iconColor = Color(0xFFF59E0B), // amber-500
+                            iconColor = if (qualityMetrics.lightStatus in listOf("Tối ưu", "Đạt")) Color(0xFFF59E0B) else Color(0xFFE11D48),
                             modifier = Modifier.weight(1f)
                         )
+
+                        // Thẻ 3: Góc nhìn đầu thực tế
                         QualityMetricBox(
                             label = "Góc nhìn",
-                            value = "0°",
-                            status = "Trực diện",
+                            value = "${qualityMetrics.angleDegree}°",
+                            status = qualityMetrics.angleStatus,
                             icon = Icons.Default.Straighten,
-                            iconColor = Color(0xFF6366F1), // indigo-500
+                            iconColor = if (qualityMetrics.angleDegree <= 15) Color(0xFF6366F1) else Color(0xFFE11D48),
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -149,13 +155,18 @@ fun FaceReviewScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // HỘP THÔNG BÁO TRẠNG THÁI (StatusAlert)
+                    // HỘP THÔNG BÁO TRẠNG THÁI & KHUYẾN NGHỊ CHÍNH XÁC (StatusAlert)
+                    val isPass = qualityMetrics.isOverallPass
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xCCEFF6FF)) // blue-50/80
-                            .border(width = 1.dp, color = Color(0xB3BFDBFE), shape = RoundedCornerShape(16.dp)) // blue-200/70
+                            .background(if (isPass) Color(0xCCEFF6FF) else Color(0xFFFFFBEB))
+                            .border(
+                                width = 1.dp,
+                                color = if (isPass) Color(0xB3BFDBFE) else Color(0xFFFDE68A),
+                                shape = RoundedCornerShape(16.dp)
+                            )
                             .padding(14.dp)
                     ) {
                         Row(
@@ -163,25 +174,25 @@ fun FaceReviewScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Info,
+                                imageVector = if (isPass) Icons.Default.Info else Icons.Default.Info,
                                 contentDescription = null,
-                                tint = Color(0xFF2563EB), // brand-600
+                                tint = if (isPass) Color(0xFF2563EB) else Color(0xFFD97706),
                                 modifier = Modifier
                                     .size(20.dp)
                                     .padding(top = 1.dp)
                             )
                             Column {
                                 Text(
-                                    text = "Ảnh mẫu đã sẵn sàng lưu trữ",
-                                    fontSize = 12.5.sp,
+                                    text = qualityMetrics.recommendationTitle,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1E293B) // slate-800
+                                    color = if (isPass) Color(0xFF1E293B) else Color(0xFF92400E)
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(3.dp))
                                 Text(
-                                    text = "Ảnh chụp đã vượt qua bài kiểm tra liveness và chất lượng. Dữ liệu chưa lưu vào máy chủ. Vui lòng nhấn \"Hoàn tất đăng ký\" để lưu trữ mẫu mã hóa vào hệ thống Kiosk.",
+                                    text = qualityMetrics.recommendationMessage,
                                     fontSize = 11.5.sp,
-                                    color = Color(0xFF475569), // slate-600
+                                    color = if (isPass) Color(0xFF475569) else Color(0xFF78350F),
                                     lineHeight = 16.5.sp
                                 )
                             }

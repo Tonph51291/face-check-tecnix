@@ -47,9 +47,9 @@ import androidx.compose.ui.unit.sp
  * Khung ngắm Camera AI chuẩn Stitch (CameraViewfinder):
  * - Tỉ lệ khung 3:3.6 bo góc 16dp (rounded-2xl) với nền đen và viền zinc-800.
  * - 4 góc kim loại HUD tối giản zinc-400.
- * - Top HUD Guidance Chip dạng viên thuốc viền zinc-700/80 với dot chuyển trạng thái Amber/Emerald.
- * - Khung Oval dẫn hướng AI bo tròn giữa màn hình với hiệu ứng nhịp thở nhẹ nhàng.
- * - Thước đo chất lượng căn chỉnh đáy khung ngắm (Bottom HUD Quality Meter) chuẩn thanh trượt Brand-600.
+ * - Top HUD Guidance Banner: Đặt phía trên Oval, nền tối mờ chống chói, chữ to rõ (14-15sp) với icon trạng thái phân màu trực quan.
+ * - Khung Oval trung tâm: Hoàn toàn trong suốt, KHÔNG có chữ/icon đè lên mặt người dùng; viền đổi màu theo trạng thái căn chỉnh (Vàng -> Xanh).
+ * - Bottom HUD Quality Meter: Hiển thị tiến độ giữ yên thực tế (0% -> 100%), loại bỏ số % ảo.
  */
 @Composable
 fun FaceViewfinderHud(
@@ -61,36 +61,24 @@ fun FaceViewfinderHud(
     isUploading: Boolean = false,
     cameraContent: (@Composable () -> Unit)? = null
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse_animation")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.02f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse_scale"
-    )
-
     val ovalColor = when {
         isUploading -> Color(0xFF818CF8) // Indigo
-        isAligned && stabilityProgress > 0.5f -> Color(0xFF34D399) // Emerald-400
-        isAligned -> Color(0xFF60A5FA) // Blue-400
-        else -> Color(0xFFA1A1AA) // Zinc-400
+        isAligned && stabilityProgress > 0.5f -> Color(0xFF10B981) // Emerald-500 sáng rõ
+        isAligned -> Color(0xFF38BDF8) // Sky-400
+        else -> Color(0xFFF59E0B) // Amber-500 nổi bật báo cần căn chỉnh
     }
 
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(3f / 3.6f)
+            .aspectRatio(3f / 3.6f, matchHeightConstraintsFirst = true)
             .shadow(elevation = 3.dp, shape = RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black)
             .border(width = 1.dp, color = Color(0xFF27272A), shape = RoundedCornerShape(16.dp))
             .drawBehind {
                 // HUD 4 Corner Precision Brackets (Zinc-400)
-                val cornerLength = 20.dp.toPx()
-                val strokeWidth = 2.dp.toPx()
+                val cornerLength = 22.dp.toPx()
+                val strokeWidth = 2.5.dp.toPx()
                 val radius = 4.dp.toPx()
                 val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
                 val cornerColor = Color(0xFFA1A1AA) // zinc-400
@@ -138,133 +126,127 @@ fun FaceViewfinderHud(
             cameraContent()
         }
 
-        // 2. Nội dung HUD phủ trên Camera
+        // 2. Lớp phủ HUD
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(14.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top HUD Guidance Chip (Đúng chuẩn Stitch)
+            // TOP HUD GUIDANCE BANNER: Đặt phía trên Oval, tương phản cao, chữ to rõ ràng
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color(0xE618181B)) // zinc-900/90
-                    .border(width = 1.dp, color = Color(0xCC3F3F46), shape = RoundedCornerShape(999.dp)) // zinc-700/80
-                    .padding(horizontal = 12.dp, vertical = 5.dp)
+                    .fillMaxWidth(0.92f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xEE0F172A)) // slate-900 mờ 93% chống chói hoàn hảo
+                    .border(
+                        width = 1.dp,
+                        color = if (isAligned) Color(0xFF10B981) else Color(0xFFF59E0B),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(if (isAligned) Color(0xFF34D399) else Color(0xFFFBBF24)) // emerald vs amber
-                    )
-                    Text(
-                        text = if (isAligned) "Khuôn mặt hợp lệ" else distanceText,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFFD4D4D8) // zinc-300
-                    )
-                }
-            }
-
-            // Center AI Oval Guide with Minimal Silhouette Icon (Đúng chuẩn Stitch)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.66f)
-                    .aspectRatio(0.85f)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color(0x4D18181B)) // zinc-900/30
-                    .drawBehind {
-                        drawOval(
-                            color = ovalColor.copy(alpha = 0.85f),
-                            style = Stroke(
-                                width = 2.dp.toPx(),
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f)
-                            )
-                        )
-                    }
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isUploading) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
+                    // Status Dot / Spinner
+                    if (isUploading) {
                         CircularProgressIndicator(
                             color = Color(0xFF60A5FA),
-                            modifier = Modifier.size(42.dp),
-                            strokeWidth = 3.dp
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(if (isAligned) Color(0xFF10B981) else Color(0xFFF59E0B))
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Đang lưu mẫu...",
-                            fontSize = 13.sp,
+                            text = when {
+                                isUploading -> "Đang gửi dữ liệu AI..."
+                                isAligned -> "Khuôn mặt hợp lệ • Giữ yên"
+                                else -> distanceText.ifBlank { "Chưa căn chuẩn vị trí" }
+                            },
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
-                    }
-                } else {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        // Minimal Face Silhouette Icon
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF27272A)) // zinc-800
-                                .border(width = 1.dp, color = Color(0xFF3F3F46), shape = CircleShape), // zinc-700
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = null,
-                                tint = Color(0xFFD4D4D8), // zinc-300
-                                modifier = Modifier.size(26.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = if (isAligned) "Giữ yên khuôn mặt" else "Đưa khuôn mặt vào khung",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFFF4F4F5), // zinc-100
-                            textAlign = TextAlign.Center
-                        )
-
                         Text(
                             text = guidanceMessage,
-                            fontSize = 11.sp,
-                            color = Color(0xFFA1A1AA), // zinc-400
-                            textAlign = TextAlign.Center,
-                            lineHeight = 15.sp,
-                            modifier = Modifier.padding(top = 2.dp)
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isAligned) Color(0xFFA7F3D0) else Color(0xFFFDE68A),
+                            lineHeight = 16.sp
                         )
                     }
                 }
             }
 
-            // Bottom HUD Quality Meter (Chất lượng căn chỉnh)
+            // CENTER AI OVAL GUIDE: Trong suốt hoàn toàn để người dùng thấy rõ mặt mình
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.70f)
+                    .aspectRatio(0.82f)
+                    .clip(RoundedCornerShape(50))
+                    .drawBehind {
+                        drawOval(
+                            color = ovalColor,
+                            style = Stroke(
+                                width = 3.dp.toPx(),
+                                pathEffect = if (isAligned) null else PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                            )
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                // Chỉ hiển thị overlay khi đang upload mẫu, khi chụp bình thường để trống 100%
+                if (isUploading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0x990F172A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF60A5FA),
+                                modifier = Modifier.size(44.dp),
+                                strokeWidth = 3.5.dp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Đang lưu mẫu khuôn mặt...",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+
+            // BOTTOM HUD QUALITY / STABILITY METER: Hiển thị tiến độ thật sự (0% -> 100%)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF18181B)) // zinc-900
-                    .border(width = 1.dp, color = Color(0xFF27272A), shape = RoundedCornerShape(12.dp)) // zinc-800
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .background(Color(0xEE0F172A))
+                    .border(width = 1.dp, color = Color(0xFF334155), shape = RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                val displayProgress = if (stabilityProgress > 0f) stabilityProgress else if (isAligned) 0.85f else 0.75f
-                val percentText = (displayProgress * 100).toInt()
+                val realProgress = if (isAligned) stabilityProgress.coerceIn(0f, 1f) else 0f
+                val percentText = (realProgress * 100).toInt()
 
                 Column {
                     Row(
@@ -274,46 +256,53 @@ fun FaceViewfinderHud(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(6.dp)
+                                    .size(7.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF2563EB)) // brand-500
+                                    .background(if (isAligned) Color(0xFF10B981) else Color(0xFF64748B))
                             )
                             Text(
-                                text = "Chất lượng căn chỉnh",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFFD4D4D8) // zinc-300
+                                text = when {
+                                    isUploading -> "AI đang xử lý mẫu ảnh..."
+                                    isAligned -> "Tiến độ quét khuôn mặt"
+                                    else -> "Đưa khuôn mặt vào khung oval"
+                                },
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isAligned) Color(0xFFF1F5F9) else Color(0xFF94A3B8)
                             )
                         }
+
                         Text(
-                            text = "$percentText%",
-                            fontSize = 12.sp,
+                            text = if (isAligned) "$percentText%" else "Chờ căn chỉnh",
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFE4E4E7) // zinc-200
+                            color = if (isAligned) Color(0xFF34D399) else Color(0xFF64748B)
                         )
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Progress Bar
+                    // Progress Track
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
                             .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0xFF27272A)) // zinc-800
+                            .background(Color(0xFF1E293B))
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(displayProgress.coerceIn(0f, 1f))
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(Color(0xFF2563EB)) // brand-600
-                        )
+                        if (realProgress > 0f) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(realProgress)
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color(0xFF10B981))
+                            )
+                        }
                     }
                 }
             }

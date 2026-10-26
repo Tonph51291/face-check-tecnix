@@ -31,11 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -68,7 +64,7 @@ import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 fun FaceCaptureScreen(
     employee: Employee,
     onNavigateBack: () -> Unit,
-    onCaptureFace: (Bitmap?) -> Unit,
+    onCaptureFace: (Bitmap?, com.company.attendance.domain.model.FaceQualityMetrics) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: FaceCaptureViewModel = viewModel()
 ) {
@@ -79,10 +75,17 @@ fun FaceCaptureScreen(
         viewModel.initEmployee(targetEmployeeId)
     }
 
-    // Khi đã hoàn tất toàn bộ 3 mẫu -> tự động chuyển sang màn hình Review
-    LaunchedEffect(uiState.isCompleted) {
-        if (uiState.isCompleted) {
-            onCaptureFace(uiState.lastCapturedBitmap)
+    // Lắng nghe one-off event từ ViewModel để điều hướng độc lập với State UI
+    LaunchedEffect(viewModel) {
+        viewModel.effect.collect { effect ->
+            when (effect) {
+                is FaceCaptureEffect.NavigateToReview -> {
+                    onCaptureFace(effect.bitmap, effect.metrics)
+                }
+                FaceCaptureEffect.NavigateBack -> {
+                    onNavigateBack()
+                }
+            }
         }
     }
 
@@ -101,54 +104,55 @@ fun FaceCaptureScreen(
             EnrollmentTopBar(
                 title = "TECNIX KIOSK",
                 subtitle = "Đăng ký sinh trắc học",
-                onNavigateBack = onNavigateBack
+                onNavigateBack = {
+                    viewModel.onCancelClicked()
+                }
             )
 
-            // 2. NỘI DUNG CUỘN CHÍNH
-            Box(
+            // 2. NỘI DUNG CHÍNH (Layout cố định, không cuộn - triệt tiêu hoàn toàn giật rung)
+            Column(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.TopCenter
+                    .fillMaxWidth()
+                    .widthIn(max = 680.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
+                // Header gọn: Gom thông tin nhân sự & Bước chụp trên CÙNG 1 KHỐI TINH GỌN (Compact Bar)
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 680.dp)
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Tiêu đề màn hình & Camera Status Pill
-                    CaptureHeaderStatusRow(isUploading = uiState.isUploading)
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Step Info Row: Bước chụp trên 1 dòng duy nhất (Chuẩn Stitch)
-                    StepInfoRow(
+                    CompactStaffAndStepBar(
+                        employee = employee,
                         stepTitle = uiState.stepTitle,
-                        sampleCount = uiState.sampleCount
+                        sampleCount = uiState.sampleCount,
+                        isUploading = uiState.isUploading
                     )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Staff Card: Thẻ thông tin nhân sự đang đăng ký (Chuẩn Stitch)
-                    StaffIdentityCard(employee = employee)
 
                     // Thông báo lỗi nếu server hoặc camera trả về lỗi
                     if (uiState.errorMessage != null) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         CaptureErrorBanner(
                             errorMessage = uiState.errorMessage ?: "",
                             onDismiss = { viewModel.dismissError() },
                             onClearAndRetry = { viewModel.clearOldSamplesAndRetry() }
                         )
                     }
+                }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                    // Khung Camera AI Viewfinder
+                // Khung Camera AI Viewfinder - Chiếm trung tâm màn hình, cố định vững chắc
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
                     FaceViewfinderHud(
+                        modifier = Modifier.fillMaxSize(),
                         guidanceMessage = uiState.guidanceText,
                         distanceText = uiState.distanceText,
                         stabilityProgress = uiState.stabilityProgress,
@@ -167,238 +171,150 @@ fun FaceCaptureScreen(
                             )
                         }
                     )
-
-                    Spacer(modifier = Modifier.height(18.dp))
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
             // 3. BOTTOM ACTIONS TOOLBAR (Chuẩn Stitch footer)
             CaptureBottomToolbar(
-                sampleCount = uiState.sampleCount,
-                isUploading = uiState.isUploading,
-                onCapture = { viewModel.triggerCapture() },
-                onCancel = onNavigateBack
+                onCancel = {
+                    viewModel.onCancelClicked()
+                }
             )
         }
     }
 }
 
 /**
- * Tiêu đề màn hình & Camera Status Pill (Hiệu ứng chấm xanh nhấp nháy)
+ * Thanh tóm tắt thông tin nhân sự và bước chụp trên CÙNG 1 KHỐI TINH GỌN (Compact Bar):
+ * - Chiều cao chỉ ~48-52dp, không chiếm không gian màn hình Kiosk.
+ * - Hiển thị Tên nhân viên, Mã NV, Phòng ban và Badge bước chụp hiện tại kèm số mẫu đã lưu.
+ * - Đảm bảo vừa vặn toàn bộ giao diện trong 1 màn hình duy nhất mà không cần scroll.
  */
 @Composable
-private fun CaptureHeaderStatusRow(isUploading: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition(label = "ping_transition")
+private fun CompactStaffAndStepBar(
+    employee: Employee,
+    stepTitle: String,
+    sampleCount: Int,
+    isUploading: Boolean
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "camera_dot_transition")
     val pingAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 0.2f,
+        initialValue = 0.9f,
+        targetValue = 0.25f,
         animationSpec = infiniteRepeatable(
             animation = tween(900, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "ping_alpha"
+        label = "dot_alpha"
     )
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "Đăng ký khuôn mặt",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF0F172A) // slate-900
-        )
-
-        // Camera Status Pill
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(if (isUploading) Color(0xFFEFF6FF) else Color(0xFFECFDF5)) // emerald-50
-                .border(
-                    width = 1.dp,
-                    color = if (isUploading) Color(0xFFBFDBFE) else Color(0xFFA7F3D0), // emerald-200
-                    shape = RoundedCornerShape(999.dp)
-                )
-                .padding(horizontal = 10.dp, vertical = 5.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isUploading) Color(0xFF2563EB)
-                            else Color(0xFF10B981).copy(alpha = pingAlpha)
-                        )
-                )
-                Text(
-                    text = if (isUploading) "AI ĐANG XỬ LÝ" else "CAMERA SẴN SÀNG",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp,
-                    color = if (isUploading) Color(0xFF1D4ED8) else Color(0xFF047857)
-                )
-            }
-        }
-    }
-}
-
-/**
- * Thẻ thông tin bước chụp trên CÙNG 1 DÒNG DUY NHẤT (Chuẩn Stitch step-info-card)
- */
-@Composable
-private fun StepInfoRow(stepTitle: String, sampleCount: Int) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 1.dp, shape = RoundedCornerShape(14.dp), spotColor = Color(0x0A000000))
-            .clip(RoundedCornerShape(14.dp))
+            .shadow(elevation = 1.dp, shape = RoundedCornerShape(12.dp), spotColor = Color(0x0A000000))
+            .clip(RoundedCornerShape(12.dp))
             .background(Color.White)
-            .border(width = 1.dp, color = Color(0xFFE2E8F0), shape = RoundedCornerShape(14.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .border(width = 1.dp, color = Color(0xFFE2E8F0), shape = RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Bên trái: Avatar Initial + Tên NV + Mã NV
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF2563EB)) // brand-600
-                )
-                Text(
-                    text = stepTitle.ifBlank { "Bước ${sampleCount + 1}/3: Chụp chính diện" },
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF1E293B) // slate-800
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFFF1F5F9)) // slate-100
-                    .border(width = 1.dp, color = Color(0xFFE2E8F0), shape = RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = "($sampleCount/3 mẫu đã lưu)",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF64748B) // slate-500
-                )
-            }
-        }
-    }
-}
-
-/**
- * Thẻ thông tin nhân viên (Chuẩn Stitch user-info-card)
- */
-@Composable
-private fun StaffIdentityCard(employee: Employee) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(elevation = 1.dp, shape = RoundedCornerShape(14.dp), spotColor = Color(0x0A000000))
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White)
-            .border(width = 1.dp, color = Color(0xFFE2E8F0), shape = RoundedCornerShape(14.dp))
-            .padding(14.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Profile Badge Initial
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFEFF6FF)) // brand-50
-                        .border(width = 1.dp, color = Color(0xFFDBEAFE), shape = RoundedCornerShape(10.dp)),
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFEFF6FF))
+                        .border(width = 1.dp, color = Color(0xFFDBEAFE), shape = RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = employee.avatarInitials.ifBlank { employee.name.take(1).uppercase() },
-                        fontSize = 18.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2563EB) // brand-600
+                        color = Color(0xFF2563EB)
                     )
                 }
 
-                Column(modifier = Modifier.weight(1f)) {
+                Column {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
                             text = employee.name,
-                            fontSize = 14.5.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A) // slate-900
+                            color = Color(0xFF0F172A)
                         )
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFFDBEAFE)) // brand-100
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFFDBEAFE))
+                                .padding(horizontal = 6.dp, vertical = 1.dp)
                         ) {
                             Text(
                                 text = employee.code,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1D4ED8) // brand-700
+                                color = Color(0xFF1D4ED8)
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = employee.department,
-                        fontSize = 12.sp,
+                        text = employee.department.ifBlank { "Nhân sự" },
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color(0xFF64748B) // slate-500
+                        color = Color(0xFF64748B)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Ghi chú xác nhận dưới cùng
+            // Bên phải: Badge Bước chụp + Số mẫu
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFF8FAFC), shape = RoundedCornerShape(8.dp))
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isUploading) Color(0xFFEFF6FF) else Color(0xFFF1F5F9))
+                    .border(
+                        width = 1.dp,
+                        color = if (isUploading) Color(0xFFBFDBFE) else Color(0xFFE2E8F0),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(14.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isUploading) Color(0xFF2563EB)
+                                else Color(0xFF10B981).copy(alpha = pingAlpha)
+                            )
                     )
                     Text(
-                        text = "Xác nhận đúng thông tin nhân sự trước khi chụp",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFF64748B)
+                        text = stepTitle.ifBlank { "Bước ${sampleCount + 1}/3" },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isUploading) Color(0xFF1D4ED8) else Color(0xFF1E293B)
+                    )
+                    Text(
+                        text = "($sampleCount/3)",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2563EB)
                     )
                 }
             }
@@ -470,16 +386,12 @@ private fun CaptureErrorBanner(
 }
 
 /**
- * Thanh nút bấm hành động chân trang chuẩn Stitch:
- * - Nút Chụp mẫu khuôn mặt (Primary Brand Blue)
+ * Thanh hành động chân trang chuẩn Stitch:
  * - Nút Hủy đăng ký (Secondary Slate)
  * - Home indicator bar
  */
 @Composable
 private fun CaptureBottomToolbar(
-    sampleCount: Int,
-    isUploading: Boolean,
-    onCapture: () -> Unit,
     onCancel: () -> Unit
 ) {
     Box(
@@ -496,69 +408,23 @@ private fun CaptureBottomToolbar(
                 .widthIn(max = 680.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Nút Hủy đăng ký (Secondary Slate)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFF1F5F9)) // slate-100
+                    .border(width = 1.dp, color = Color(0xFFE2E8F0), shape = RoundedCornerShape(12.dp))
+                    .clickable { onCancel() },
+                contentAlignment = Alignment.Center
             ) {
-                // Nút chụp chính (Primary brand-600)
-                Button(
-                    onClick = onCapture,
-                    enabled = !isUploading,
-                    modifier = Modifier
-                        .weight(1.5f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF2563EB), // brand-600
-                        contentColor = Color.White
-                    )
-                ) {
-                    if (isUploading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Đang lưu mẫu...",
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.PhotoCamera,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Chụp mẫu khuôn mặt (${sampleCount}/3)",
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                // Nút Hủy đăng ký (Secondary Slate)
-                Box(
-                    modifier = Modifier
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFF1F5F9)) // slate-100
-                        .border(width = 1.dp, color = Color(0xFFE2E8F0), shape = RoundedCornerShape(12.dp))
-                        .clickable { onCancel() }
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Hủy đăng ký",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFF334155) // slate-700
-                    )
-                }
+                Text(
+                    text = "Hủy đăng ký",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF334155) // slate-700
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))

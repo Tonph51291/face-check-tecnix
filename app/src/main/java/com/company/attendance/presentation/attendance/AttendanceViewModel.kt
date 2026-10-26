@@ -161,7 +161,7 @@ class AttendanceViewModel(
                         isSettingsDialogVisible = false,
                         isEmployeeSearchVisible = (event.screen == KioskScreen.EMPLOYEE_SEARCH),
                         selectedEmployee = if (event.screen == KioskScreen.ATTENDANCE) null else it.selectedEmployee,
-                        capturedBitmap = if (event.screen == KioskScreen.ATTENDANCE) null else it.capturedBitmap
+                        capturedBitmap = if (event.screen == KioskScreen.ATTENDANCE || event.screen == KioskScreen.EMPLOYEE_DETAIL || event.screen == KioskScreen.FACE_CAPTURE) null else it.capturedBitmap
                     )
                 }
             }
@@ -185,8 +185,9 @@ class AttendanceViewModel(
             is AttendanceUiEvent.OnCaptureFaceSample -> {
                 _uiState.update {
                     it.copy(
-                        capturedFaceScore = 98,
+                        capturedFaceScore = event.metrics?.sharpnessPercent ?: 98,
                         capturedBitmap = event.bitmap,
+                        faceQualityMetrics = event.metrics,
                         currentScreen = KioskScreen.FACE_REVIEW
                     )
                 }
@@ -198,6 +199,7 @@ class AttendanceViewModel(
                     _uiState.update {
                         it.copy(
                             selectedEmployee = updatedEmployee,
+                            shouldRefreshEmployeeList = true,
                             currentScreen = KioskScreen.EMPLOYEE_DETAIL
                         )
                     }
@@ -210,9 +212,13 @@ class AttendanceViewModel(
                 _uiState.update {
                     it.copy(
                         currentScreen = KioskScreen.FACE_CAPTURE,
-                        capturedBitmap = null
+                        capturedBitmap = null,
+                        shouldRefreshEmployeeList = true
                     )
                 }
+            }
+            is AttendanceUiEvent.OnConsumeRefreshEmployeeList -> {
+                _uiState.update { it.copy(shouldRefreshEmployeeList = false) }
             }
 
             is AttendanceUiEvent.OnToggleRealMode -> {
@@ -239,12 +245,46 @@ class AttendanceViewModel(
     private fun handleFaceFrame(faceData: FaceDetectionData?) {
         val currentStatus = _uiState.value.status
 
-        // Nếu đang trong trạng thái xử lý kết quả hoặc cooldown, không nhận diện lại
-        if (currentStatus == RecognitionStatus.VERIFYING ||
-            currentStatus == RecognitionStatus.SUCCESS ||
-            currentStatus == RecognitionStatus.FAILURE ||
+        // 0. Nếu đang trong trạng thái hiển thị kết quả (SUCCESS / DUPLICATE / FAILURE):
+        if (currentStatus == RecognitionStatus.SUCCESS ||
             currentStatus == RecognitionStatus.DUPLICATE ||
-            currentStatus == RecognitionStatus.COOLDOWN ||
+            currentStatus == RecognitionStatus.FAILURE
+        ) {
+            // Trường hợp A: Phát hiện người mới bước vào ngay (trackingId khác hẳn người vừa chấm)
+            if (faceData?.trackingId != null && faceData.trackingId != lastCheckedTrackingId) {
+                logI("Phát hiện người mới bước vào camera (trackingId: ${faceData.trackingId} != $lastCheckedTrackingId) -> Đổi lượt quét ngay lập tức")
+                autoDismissJob?.cancel()
+                _uiState.update {
+                    it.copy(
+                        status = RecognitionStatus.IDLE,
+                        resultData = null,
+                        duplicateMessage = null,
+                        isWaitingFaceClearance = false,
+                        stabilityProgress = 0f
+                    )
+                }
+                // Không return -> rơi xuống luồng dưới để bắt đầu căn chỉnh và nhận diện người mới ngay!
+            } else if (faceData == null) {
+                // Trường hợp B: Người vừa chấm đã rời khỏi khung hình
+                clearanceNoFaceFrames++
+                if (clearanceNoFaceFrames >= 2) { // 2 frame (~200ms) không còn mặt trong camera
+                    clearanceNoFaceFrames = 0
+                    // Cho phép đóng kết quả sớm nếu người cũ đã rời đi
+                    if (_uiState.value.autoDismissRemainingSeconds <= 1) {
+                        resetToIdle()
+                        return
+                    }
+                }
+                return
+            } else {
+                // Người cũ vẫn đang đứng trước camera xem kết quả
+                clearanceNoFaceFrames = 0
+                return
+            }
+        }
+
+        // Nếu đang trong trạng thái gửi dữ liệu lên AI Server hoặc lỗi thiết bị, không xử lý frame
+        if (currentStatus == RecognitionStatus.VERIFYING ||
             currentStatus == RecognitionStatus.CAMERA_ERROR ||
             currentStatus == RecognitionStatus.PERMISSION_DENIED
         ) {
@@ -253,30 +293,45 @@ class AttendanceViewModel(
 
         // Kiểm tra cơ chế Face Clearance: Bắt buộc người vừa chấm phải rời khỏi camera
         if (_uiState.value.isWaitingFaceClearance) {
-            if (faceData == null) {
+            // Nếu phát hiện người mới (trackingId khác người vừa chấm) -> Mở khóa Face Clearance ngay lập tức!
+            if (faceData?.trackingId != null && faceData.trackingId != lastCheckedTrackingId) {
+                logI("Người mới xuất hiện trong thời gian chờ clearance (trackingId: ${faceData.trackingId}) -> Mở khóa quét ngay")
+                clearanceNoFaceFrames = 0
+                _uiState.update {
+                    it.copy(
+                        isWaitingFaceClearance = false,
+                        stabilityProgress = 0f
+                    )
+                }
+                // Rơi xuống luồng dưới để xử lý khuôn mặt người mới ngay lập tức
+            } else if (faceData == null) {
                 clearanceNoFaceFrames++
-                if (clearanceNoFaceFrames >= 3) { // ~350ms - 500ms không còn mặt trong khung hình
+                if (clearanceNoFaceFrames >= 2) { // ~200ms không còn mặt trong khung hình là đủ xác nhận đã rời đi
                     clearanceNoFaceFrames = 0
                     _uiState.update {
                         it.copy(
                             isWaitingFaceClearance = false,
+                            status = RecognitionStatus.IDLE,
                             activeGuidance = "Vui lòng nhìn thẳng vào camera",
                             confidenceText = "Đang tìm khuôn mặt..."
                         )
                     }
                 }
+                return
             } else {
+                // Vẫn là người cũ chưa rời đi -> Hiển thị thông báo nhường vị trí với status COOLDOWN
                 clearanceNoFaceFrames = 0
                 _uiState.update {
                     it.copy(
+                        status = RecognitionStatus.COOLDOWN,
                         faceData = faceData,
                         activeGuidance = "Bạn vừa hoàn tất chấm công. Vui lòng nhường vị trí cho người tiếp theo.",
                         confidenceText = "Vui lòng nhường vị trí",
                         stabilityProgress = 0f
                     )
                 }
+                return
             }
-            return
         }
 
         // 1. Không có khuôn mặt
@@ -296,8 +351,7 @@ class AttendanceViewModel(
             return
         }
 
-
-        // Kiểm tra chống chấm công lặp liên tục cho cùng một trackingId
+        // Kiểm tra chống chấm công lặp liên tục cho cùng một trackingId (chỉ chặn nếu là cùng 1 người)
         val now = System.currentTimeMillis()
         if (faceData.trackingId != null &&
             faceData.trackingId == lastCheckedTrackingId &&
@@ -412,7 +466,7 @@ class AttendanceViewModel(
                                         serverMessage = record.serverMessage ?: if (record.attendanceType == com.company.attendance.domain.model.AttendanceType.CHECK_OUT) "Chấm công tan ca thành công" else "Chấm công vào ca thành công",
                                         isDemo = false
                                     ),
-                                    autoDismissRemainingSeconds = 3,
+                                    autoDismissRemainingSeconds = 2,
                                     isWaitingFaceClearance = true
                                 )
                             }
@@ -428,7 +482,7 @@ class AttendanceViewModel(
                                         status = RecognitionStatus.DUPLICATE,
                                         duplicateMessage = error.message,
                                         confidenceText = "Đã ghi nhận",
-                                        autoDismissRemainingSeconds = 3,
+                                        autoDismissRemainingSeconds = 2,
                                         isWaitingFaceClearance = true
                                     )
                                 }
@@ -441,7 +495,7 @@ class AttendanceViewModel(
                                         status = RecognitionStatus.FAILURE,
                                         failureReason = error.message,
                                         confidenceText = "Không thành công",
-                                        autoDismissRemainingSeconds = 3
+                                        autoDismissRemainingSeconds = 2
                                     )
                                 }
                                 _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
@@ -455,7 +509,7 @@ class AttendanceViewModel(
                             status = RecognitionStatus.FAILURE,
                             failureReason = "Không thể lấy hình ảnh từ camera. Vui lòng căn chỉnh lại.",
                             confidenceText = "Lỗi chụp khung hình",
-                            autoDismissRemainingSeconds = 3
+                            autoDismissRemainingSeconds = 2
                         )
                     }
                     _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
@@ -498,7 +552,7 @@ class AttendanceViewModel(
                                         matchScore = matchResult.similarityScore * 100f,
                                         isDemo = true
                                     ),
-                                    autoDismissRemainingSeconds = 3
+                                    autoDismissRemainingSeconds = 2
                                 )
                             }
                             _uiEffect.emit(AttendanceUiEffect.PlaySuccessSound)
@@ -509,7 +563,7 @@ class AttendanceViewModel(
                                     status = RecognitionStatus.FAILURE,
                                     failureReason = matchResult.message,
                                     confidenceText = "Chưa nhận diện danh tính",
-                                    autoDismissRemainingSeconds = 3
+                                    autoDismissRemainingSeconds = 2
                                 )
                             }
                             _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
@@ -522,7 +576,7 @@ class AttendanceViewModel(
                                 status = RecognitionStatus.FAILURE,
                                 failureReason = result.error.message,
                                 confidenceText = "Lỗi nhận diện",
-                                autoDismissRemainingSeconds = 3
+                                autoDismissRemainingSeconds = 2
                             )
                         }
                         _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
@@ -558,7 +612,7 @@ class AttendanceViewModel(
                         attendanceStatus = "Đúng giờ",
                         isDemo = true
                     ),
-                    autoDismissRemainingSeconds = 3,
+                    autoDismissRemainingSeconds = 2,
                     isWaitingFaceClearance = true
                 )
             }
@@ -583,7 +637,7 @@ class AttendanceViewModel(
                     confidenceText = "Độ khớp thấp: 24% (Mô phỏng)",
                     failureReason = "Khuôn mặt chưa khớp hồ sơ TECNIX. Vui lòng căn chỉnh lại góc nhìn hoặc liên hệ quản lý.",
                     resultData = null,
-                    autoDismissRemainingSeconds = 3
+                    autoDismissRemainingSeconds = 2
                 )
             }
             _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
@@ -591,10 +645,10 @@ class AttendanceViewModel(
         }
     }
 
-    private fun startAutoDismissCountdown() {
+    private fun startAutoDismissCountdown(seconds: Int = 2) {
         autoDismissJob?.cancel()
         autoDismissJob = viewModelScope.launch {
-            for (i in 3 downTo 1) {
+            for (i in seconds downTo 1) {
                 _uiState.update { it.copy(autoDismissRemainingSeconds = i) }
                 delay(1000)
             }

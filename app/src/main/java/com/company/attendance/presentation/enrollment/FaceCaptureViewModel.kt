@@ -11,20 +11,36 @@ import com.company.attendance.core.util.toBase64Jpeg
 import com.company.attendance.di.RepositoryModule
 import com.company.attendance.domain.model.FaceAlignmentStatus
 import com.company.attendance.domain.model.FaceDetectionData
+import com.company.attendance.domain.model.FaceQualityMetrics
 import com.company.attendance.domain.repository.EmployeeRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.min
 
 /**
+ * Hiệu ứng một lần (One-off Navigation & UI Effects) cho màn hình FaceCapture
+ */
+sealed interface FaceCaptureEffect {
+    data class NavigateToReview(
+        val bitmap: Bitmap?,
+        val metrics: FaceQualityMetrics
+    ) : FaceCaptureEffect
+    data object NavigateBack : FaceCaptureEffect
+}
+
+/**
  * ViewModel điều khiển quy trình Smart Auto-Capture & Multi-shot Face Enrollment (3 mẫu).
  * Tích hợp tự động nhận diện ổn định (Face Stability Detection), chụp tự động và gửi Base64 lên AI Server.
+ * Điều hướng được phát qua Channel/Flow effect để tách biệt hoàn toàn khỏi Compose UI.
  */
 class FaceCaptureViewModel(
     private val employeeRepository: EmployeeRepository = RepositoryModule.employeeRepository
@@ -33,23 +49,53 @@ class FaceCaptureViewModel(
     private val _uiState = MutableStateFlow(FaceCaptureUiState())
     val uiState: StateFlow<FaceCaptureUiState> = _uiState.asStateFlow()
 
+    private val _effect = Channel<FaceCaptureEffect>(Channel.BUFFERED)
+    val effect: Flow<FaceCaptureEffect> = _effect.receiveAsFlow()
+
     private var bitmapProvider: (() -> Bitmap?)? = null
     private var cooldownJob: Job? = null
     private var isCoolingDown = false
+    private var latestFaceData: FaceDetectionData? = null
 
-    fun initEmployee(employeeId: String) {
-        if (employeeId.isNotBlank() && _uiState.value.employeeId != employeeId) {
-            _uiState.update {
-                it.copy(
-                    employeeId = employeeId,
-                    currentStep = 1,
-                    sampleCount = 0,
-                    stabilityProgress = 0f,
-                    isCompleted = false,
-                    errorMessage = null
-                )
+    /**
+     * Khởi tạo hoặc đặt lại hoàn toàn trạng thái đăng ký cho nhân viên để bắt đầu phiên chụp mới.
+     */
+    fun resetEnrollment(employeeId: String) {
+        if (employeeId.isBlank()) return
+        cooldownJob?.cancel()
+        isCoolingDown = false
+        _uiState.update {
+            it.copy(
+                employeeId = employeeId,
+                currentStep = 1,
+                sampleCount = 0,
+                stabilityProgress = 0f,
+                errorMessage = null,
+                lastCapturedBitmap = null,
+                isUploading = false,
+                isFaceAligned = false,
+                guidanceText = "Nhìn thẳng vào camera và giữ yên khuôn mặt",
+                distanceText = "Khoảng cách hợp lệ (65 cm) • Độ sáng: Tốt"
+            )
+        }
+        logI("Đặt lại (reset) phiên FaceCapture cho nhân viên: $employeeId")
+    }
+
+    fun initEmployee(employeeId: String, forceReset: Boolean = false) {
+        if (employeeId.isNotBlank()) {
+            if (forceReset || _uiState.value.employeeId != employeeId) {
+                resetEnrollment(employeeId)
             }
-            logI("Khởi tạo FaceCapture cho nhân viên: $employeeId")
+        }
+    }
+
+    /**
+     * Hủy phiên đăng ký và gửi sự kiện quay về màn hình trước
+     */
+    fun onCancelClicked() {
+        resetEnrollment(_uiState.value.employeeId)
+        viewModelScope.launch {
+            _effect.send(FaceCaptureEffect.NavigateBack)
         }
     }
 
@@ -62,8 +108,10 @@ class FaceCaptureViewModel(
      * Tự động tính toán độ ổn định (stability) trong ~1.2 giây để kích hoạt auto-capture.
      */
     fun onFaceFrame(faceData: FaceDetectionData?) {
+        this.latestFaceData = faceData
+        logD("face Data $faceData")
         val state = _uiState.value
-        if (state.isUploading || state.isCompleted || isCoolingDown) {
+        if (state.isUploading || isCoolingDown) {
             return
         }
 
@@ -135,20 +183,19 @@ class FaceCaptureViewModel(
         // Đạt 100% ổn định -> Kích hoạt TỰ ĐỘNG CHỤP KHUÔN MẶT
         if (newProgress >= 1.0f) {
             logD("Đạt độ ổn định 100% cho Bước ${state.currentStep}/3. Tự động chụp...")
-            triggerCapture()
+            triggerAutoCapture()
         }
     }
 
     /**
-     * Kích hoạt chụp mẫu (Tự động hoặc khi người dùng bấm nút chụp thủ công)
+     * Kích hoạt tự động chụp mẫu khi khuôn mặt đạt 100% độ ổn định
      */
-    fun triggerCapture() {
+    private fun triggerAutoCapture() {
         val state = _uiState.value
-        if (state.isUploading || state.isCompleted) return
+        if (state.isUploading) return
 
         val bitmap = bitmapProvider?.invoke()
         if (bitmap == null) {
-            logE("Không thể chụp khung hình từ camera (Bitmap null)")
             _uiState.update {
                 it.copy(
                     errorMessage = "Không thể lấy hình ảnh từ camera. Vui lòng thử lại.",
@@ -168,13 +215,14 @@ class FaceCaptureViewModel(
 
         viewModelScope.launch {
             try {
+                // Phân tích chất lượng ảnh thực tế: độ sắc nét, ánh sáng, góc nhìn
+                val qualityMetrics = com.company.attendance.domain.ml.BitmapQualityAnalyzer.analyze(bitmap, latestFaceData)
+
                 // Nén JPEG và mã hóa Base64
                 val base64 = bitmap.toBase64Jpeg(quality = 85, maxDimension = 1080)
                 val empId = state.employeeId
 
-                logI("Gửi mẫu ảnh Base64 cho nhân viên $empId (Bước ${state.currentStep}/3)...")
                 val result = employeeRepository.enrollFaceSample(empId, base64)
-                logI("Result test base image ${result}")
                 when (result) {
                     is Result.Success -> {
                         val enrollData = result.data
@@ -187,14 +235,15 @@ class FaceCaptureViewModel(
                             _uiState.update {
                                 it.copy(
                                     isUploading = false,
-                                    isCompleted = true,
                                     sampleCount = newSampleCount,
                                     currentStep = 3,
                                     stabilityProgress = 1f,
                                     lastCapturedBitmap = bitmap,
+                                    lastQualityMetrics = qualityMetrics,
                                     guidanceText = "Đăng ký thành công trọn bộ 3 mẫu sinh trắc học!"
                                 )
                             }
+                            _effect.send(FaceCaptureEffect.NavigateToReview(bitmap, qualityMetrics))
                         } else {
                             val nextStep = min(newSampleCount + 1, 3)
                             _uiState.update {
@@ -204,6 +253,7 @@ class FaceCaptureViewModel(
                                     currentStep = nextStep,
                                     stabilityProgress = 0f,
                                     lastCapturedBitmap = bitmap,
+                                    lastQualityMetrics = qualityMetrics,
                                     guidanceText = "Lưu mẫu $newSampleCount/3 thành công! Chuẩn bị bước $nextStep..."
                                 )
                             }
@@ -277,4 +327,3 @@ class FaceCaptureViewModel(
         }
     }
 }
-

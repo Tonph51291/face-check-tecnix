@@ -31,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,11 +67,21 @@ import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 fun EmployeeSearchScreen(
     onNavigateBack: () -> Unit,
     onEmployeeSelected: (String) -> Unit = {},
+    shouldRefresh: Boolean = false,
+    onRefreshConsumed: () -> Unit = {},
     viewModel: EnrollmentViewModel = viewModel(),
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val pagingEmployees: LazyPagingItems<Employee> = viewModel.employeesPagingFlow.collectAsLazyPagingItems()
+
+    // Tự động làm mới danh sách khi nhận cờ shouldRefresh từ quy trình đăng ký thành công
+    LaunchedEffect(shouldRefresh) {
+        if (shouldRefresh) {
+            pagingEmployees.refresh()
+            onRefreshConsumed()
+        }
+    }
 
     EmployeeSearchContent(
         uiState = uiState,

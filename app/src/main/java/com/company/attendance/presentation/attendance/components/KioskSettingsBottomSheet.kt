@@ -61,7 +61,8 @@ import com.company.attendance.presentation.common.theme.SurfaceContainerLowest
 fun KioskSettingsBottomSheet(
     uiState: AttendanceUiState,
     onEvent: (AttendanceUiEvent) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onNavigateToEmployeeList: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -181,7 +182,7 @@ fun KioskSettingsBottomSheet(
                     .background(Color(0xFFEFF6FF))
                     .border(1.dp, Color(0xFFBFDBFE), RoundedCornerShape(16.dp))
                     .clickable {
-                        onEvent(AttendanceUiEvent.OnToggleEmployeeSearch(true))
+                        onNavigateToEmployeeList?.invoke() ?: onEvent(AttendanceUiEvent.OnToggleEmployeeSearch(true))
                         onDismiss()
                     }
                     .padding(14.dp)

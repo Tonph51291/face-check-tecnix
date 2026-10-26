@@ -19,28 +19,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.Face
-import androidx.compose.material.icons.filled.HourglassTop
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -52,35 +41,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.company.attendance.presentation.attendance.RecognitionStatus
 
-
-private val LaserColors = listOf(
-    Color.Transparent,
-    Color(0xFF38BDF8).copy(alpha = 0.35f),
-    Color(0xFF38BDF8),
-    Color(0xFF22D3EE),
-    Color(0xFF38BDF8),
-    Color(0xFF38BDF8).copy(alpha = 0.35f),
-    Color.Transparent
-)
-
-private val LaserGlowColors = listOf(
-    Color.Transparent,
-    Color(0xFF38BDF8).copy(alpha = 0.15f),
-    Color(0xFF38BDF8).copy(alpha = 0.35f),
-    Color(0xFF38BDF8).copy(alpha = 0.15f),
-    Color.Transparent
-)
-
-private val DashIntervals = floatArrayOf(18f, 14f)
-private val OvalDashEffect = PathEffect.dashPathEffect(DashIntervals, 0f)
-
 /**
- * Lớp phủ hướng dẫn quét khuôn mặt sinh trắc học chuẩn thiết kế Stitch Kiosk:
- * - 4 góc ngắm căn chỉnh bo tròn mềm mại
- * - Khung Oval sinh trắc học với hiệu ứng quét Laser tia cyan
- * - Icon target Avatar trung tâm dạng kính mờ (Backdrop Blur)
- * - Chip trạng thái căn chỉnh nổi phía trên
- * - Hộp thông báo vị trí và chỉ dẫn trực quan ở phía dưới
+ * Lớp phủ hướng dẫn quét khuôn mặt sinh trắc học chuẩn Stitch Kiosk:
+ * - 4 góc ngắm kim loại Zinc-400 tối giản, tinh xảo.
+ * - Top HUD Guidance Banner to rõ ở phía trên Oval, tương phản cao, chống chói hoàn hảo.
+ * - Khung Oval trung tâm trong suốt 100%, KHÔNG bị icon hay tia laser che mặt người dùng.
+ * - Viền Oval tự động đổi màu thông minh theo trạng thái (Vàng -> Xanh Emerald khi chuẩn).
+ * - Bottom Recognition Meter hiển thị thanh tiến độ nhận diện thật sự và chứng chỉ bảo mật.
  */
 @Composable
 fun FaceGuideOverlay(
@@ -91,376 +58,263 @@ fun FaceGuideOverlay(
     stabilityProgress: Float,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "scan_transition")
-    val scanProgress by infiniteTransition.animateFloat(
-        initialValue = 0.12f,
-        targetValue = 0.88f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scan_line_progress"
-    )
+    val showScanningGuidance = (status != RecognitionStatus.SUCCESS && status != RecognitionStatus.FAILURE)
 
-    val pulseAlpha by infiniteTransition.animateFloat(
+    val transition = rememberInfiniteTransition(label = "hud_pulse")
+    val pulseAlpha by transition.animateFloat(
         initialValue = 0.5f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1100, easing = FastOutSlowInEasing),
+            animation = tween(900, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulse_alpha"
     )
 
-    val showScanningGuidance = (status != RecognitionStatus.SUCCESS && status != RecognitionStatus.FAILURE)
+    val isStableOrVerifying = status == RecognitionStatus.FACE_STABLE ||
+            status == RecognitionStatus.VERIFYING ||
+            status == RecognitionStatus.SUCCESS ||
+            status == RecognitionStatus.COOLDOWN
+
+    val isAligning = status == RecognitionStatus.ALIGNING || status == RecognitionStatus.FACE_DETECTED
+
+    val ovalColor = when {
+        isStableOrVerifying -> Color(0xFF10B981) // Emerald-500 sáng rõ
+        isAligning -> Color(0xFFF59E0B) // Amber-500 nổi bật
+        else -> Color(0xFF38BDF8) // Sky-400
+    }
 
     Box(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .drawBehind {
+                // HUD 4 Corner Precision Brackets (Zinc-400)
+                val cornerLength = 22.dp.toPx()
+                val strokeWidth = 2.5.dp.toPx()
+                val radius = 4.dp.toPx()
+                val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                val cornerColor = Color(0xFFA1A1AA)
+
+                // Top-Left
+                val pathTL = Path().apply {
+                    moveTo(14.dp.toPx(), 14.dp.toPx() + cornerLength)
+                    lineTo(14.dp.toPx(), 14.dp.toPx() + radius)
+                    quadraticTo(14.dp.toPx(), 14.dp.toPx(), 14.dp.toPx() + radius, 14.dp.toPx())
+                    lineTo(14.dp.toPx() + cornerLength, 14.dp.toPx())
+                }
+                drawPath(pathTL, cornerColor, style = stroke)
+
+                // Top-Right
+                val pathTR = Path().apply {
+                    moveTo(size.width - 14.dp.toPx() - cornerLength, 14.dp.toPx())
+                    lineTo(size.width - 14.dp.toPx() - radius, 14.dp.toPx())
+                    quadraticTo(size.width - 14.dp.toPx(), 14.dp.toPx(), size.width - 14.dp.toPx(), 14.dp.toPx() + radius)
+                    lineTo(size.width - 14.dp.toPx(), 14.dp.toPx() + cornerLength)
+                }
+                drawPath(pathTR, cornerColor, style = stroke)
+
+                // Bottom-Left
+                val pathBL = Path().apply {
+                    moveTo(14.dp.toPx(), size.height - 14.dp.toPx() - cornerLength)
+                    lineTo(14.dp.toPx(), size.height - 14.dp.toPx() - radius)
+                    quadraticTo(14.dp.toPx(), size.height - 14.dp.toPx(), 14.dp.toPx() + radius, size.height - 14.dp.toPx())
+                    lineTo(14.dp.toPx() + cornerLength, size.height - 14.dp.toPx())
+                }
+                drawPath(pathBL, cornerColor, style = stroke)
+
+                // Bottom-Right
+                val pathBR = Path().apply {
+                    moveTo(size.width - 14.dp.toPx() - cornerLength, size.height - 14.dp.toPx())
+                    lineTo(size.width - 14.dp.toPx() - radius, size.height - 14.dp.toPx())
+                    quadraticTo(size.width - 14.dp.toPx(), size.height - 14.dp.toPx(), size.width - 14.dp.toPx(), size.height - 14.dp.toPx() - radius)
+                    lineTo(size.width - 14.dp.toPx(), size.height - 14.dp.toPx() - cornerLength)
+                }
+                drawPath(pathBR, cornerColor, style = stroke)
+            },
         contentAlignment = Alignment.Center
     ) {
         if (showScanningGuidance) {
-            // 1. 4 góc ngắm sinh trắc học bo góc mềm mại (Biometric 4-Corner Guides chuẩn Stitch)
-            val cornerColor = when (status) {
-                RecognitionStatus.ALIGNING -> Color(0xFFF59E0B) // Amber-500
-                RecognitionStatus.FACE_STABLE, RecognitionStatus.VERIFYING -> Color(0xFF22D3EE) // Cyan-400
-                else -> Color(0xFF3B82F6) // Blue-500
-            }
-
-            val pathTL = remember { Path() }
-            val pathTR = remember { Path() }
-            val pathBL = remember { Path() }
-            val pathBR = remember { Path() }
-
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
-                    .drawBehind {
-                        val cornerLength = 32.dp.toPx()
-                        val strokeWidth = 4.dp.toPx()
-                        val radius = 12.dp.toPx()
-                        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-
-                        // Top-Left corner
-                        pathTL.rewind()
-                        pathTL.moveTo(0f, cornerLength)
-                        pathTL.lineTo(0f, radius)
-                        pathTL.quadraticTo(0f, 0f, radius, 0f)
-                        pathTL.lineTo(cornerLength, 0f)
-                        drawPath(pathTL, cornerColor, style = stroke)
-
-                        // Top-Right corner
-                        pathTR.rewind()
-                        pathTR.moveTo(size.width - cornerLength, 0f)
-                        pathTR.lineTo(size.width - radius, 0f)
-                        pathTR.quadraticTo(size.width, 0f, size.width, radius)
-                        pathTR.lineTo(size.width, cornerLength)
-                        drawPath(pathTR, cornerColor, style = stroke)
-
-                        // Bottom-Left corner (cách đáy 52dp để không che hint box)
-                        val bottomY = size.height - 48.dp.toPx()
-                        pathBL.rewind()
-                        pathBL.moveTo(0f, bottomY - cornerLength)
-                        pathBL.lineTo(0f, bottomY - radius)
-                        pathBL.quadraticTo(0f, bottomY, radius, bottomY)
-                        pathBL.lineTo(cornerLength, bottomY)
-                        drawPath(pathBL, cornerColor, style = stroke)
-
-                        // Bottom-Right corner
-                        pathBR.rewind()
-                        pathBR.moveTo(size.width - cornerLength, bottomY)
-                        pathBR.lineTo(size.width - radius, bottomY)
-                        pathBR.quadraticTo(size.width, bottomY, size.width, bottomY - radius)
-                        pathBR.lineTo(size.width, bottomY - cornerLength)
-                        drawPath(pathBR, cornerColor, style = stroke)
-                    }
-            )
-
-            // 2. Khung Oval sinh trắc học trung tâm (Central Biometric Oval Target)
-            val ovalColor = when (status) {
-                RecognitionStatus.SUCCESS -> Color(0xFF34D399) // Emerald-400
-                RecognitionStatus.FAILURE -> Color(0xFFFB7185) // Rose-400
-                RecognitionStatus.ALIGNING -> Color(0xFFFBBF24) // Amber-400
-                RecognitionStatus.FACE_STABLE, RecognitionStatus.VERIFYING -> Color(0xFF22D3EE) // Cyan-400
-                else -> Color(0xFF38BDF8).copy(alpha = 0.85f) // Cyan-300
-            }
-
-            val isDashed =
-                (status == RecognitionStatus.IDLE || status == RecognitionStatus.ALIGNING || status == RecognitionStatus.FACE_DETECTED)
-            val ovalStrokeWidth = if (isDashed) 2.5.dp else 3.5.dp
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.62f)
-                    .widthIn(min = 200.dp, max = 265.dp)
-                    .aspectRatio(0.72f)
-                    .drawBehind {
-                        // Viền phát sáng nhẹ bao quanh
-                        if (status == RecognitionStatus.SUCCESS || status == RecognitionStatus.FACE_STABLE || status == RecognitionStatus.VERIFYING) {
-                            drawOval(
-                                color = ovalColor.copy(alpha = 0.25f),
-                                style = Stroke(width = 12.dp.toPx())
-                            )
-                        }
-
-                        // Viền chính của Oval
-                        val stroke = Stroke(
-                            width = ovalStrokeWidth.toPx(),
-                            pathEffect = if (isDashed) OvalDashEffect else null
-                        )
-                        drawOval(
-                            color = ovalColor,
-                            style = stroke
-                        )
-
-                        // Vòng cung giữ yên khuôn mặt (Stability Progress Arc)
-                        if (stabilityProgress > 0f) {
-                            val progressStroke = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
-                            drawArc(
-                                color = Color(0xFF22D3EE),
-                                startAngle = -90f,
-                                sweepAngle = 360f * stabilityProgress,
-                                useCenter = false,
-                                style = progressStroke
-                            )
-                        }
-                    },
-                contentAlignment = Alignment.Center
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Tia Laser quét lên xuống mượt mà (Vertical Sweep Laser)
-                if (status == RecognitionStatus.IDLE || status == RecognitionStatus.FACE_DETECTED || status == RecognitionStatus.ALIGNING) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .drawBehind {
-                                val lineY = size.height * scanProgress
-                                val lineWidth = size.width * 0.82f
-                                val startX = (size.width - lineWidth) / 2f
-                                val endX = startX + lineWidth
-
-                                // Tia laser chính
-                                drawRect(
-                                    brush = Brush.horizontalGradient(
-                                        colors = LaserColors,
-                                        startX = startX,
-                                        endX = endX
-                                    ),
-                                    topLeft = Offset(startX, lineY - 1.5.dp.toPx()),
-                                    size = Size(lineWidth, 3.dp.toPx())
-                                )
-
-                                // Hào quang mờ quanh tia laser
-                                drawRect(
-                                    brush = Brush.horizontalGradient(
-                                        colors = LaserGlowColors,
-                                        startX = startX,
-                                        endX = endX
-                                    ),
-                                    topLeft = Offset(startX, lineY - 6.dp.toPx()),
-                                    size = Size(lineWidth, 12.dp.toPx())
-                                )
-                            }
-                    )
-                }
-
-                // Biểu tượng tâm ngắm Avatar dạng kính mờ (Backdrop Blur Glass chuẩn Stitch)
+                // 1. TOP HUD GUIDANCE BANNER: Đặt phía trên Oval, tương phản cao, dễ nhìn từ xa
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.20f))
-                        .border(1.dp, Color.White.copy(alpha = 0.40f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = when (status) {
-                            RecognitionStatus.SUCCESS -> Icons.Default.DoneAll
-                            RecognitionStatus.FAILURE -> Icons.Default.Warning
-                            RecognitionStatus.VERIFYING -> Icons.Default.HourglassTop
-                            else -> Icons.Default.Face
-                        },
-                        contentDescription = "Target Avatar",
-                        tint = when (status) {
-                            RecognitionStatus.SUCCESS -> Color(0xFF34D399)
-                            RecognitionStatus.FAILURE -> Color(0xFFFB7185)
-                            RecognitionStatus.FACE_STABLE, RecognitionStatus.VERIFYING -> Color(
-                                0xFF22D3EE
-                            )
-
-                            else -> Color.White.copy(alpha = pulseAlpha)
-                        },
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-
-            // 3. Chip ngang trạng thái căn chỉnh ở đỉnh trên (Top Alignment Status Pill)
-            val pillBg = when (status) {
-                RecognitionStatus.SUCCESS -> Color(0xFF064E3B).copy(alpha = 0.85f)
-                RecognitionStatus.FAILURE -> Color(0xFF4C0519).copy(alpha = 0.85f)
-                RecognitionStatus.ALIGNING -> Color(0xFF451A03).copy(alpha = 0.85f)
-                RecognitionStatus.FACE_STABLE, RecognitionStatus.VERIFYING -> Color(0xFF083344).copy(
-                    alpha = 0.85f
-                )
-
-                else -> Color(0xFF0F172A).copy(alpha = 0.85f)
-            }
-
-            val pillBorder = when (status) {
-                RecognitionStatus.SUCCESS -> Color(0xFF34D399).copy(alpha = 0.5f)
-                RecognitionStatus.FAILURE -> Color(0xFFFB7185).copy(alpha = 0.5f)
-                RecognitionStatus.ALIGNING -> Color(0xFFFBBF24).copy(alpha = 0.5f)
-                RecognitionStatus.FACE_STABLE, RecognitionStatus.VERIFYING -> Color(0xFF22D3EE).copy(
-                    alpha = 0.5f
-                )
-
-                else -> Color(0xFF38BDF8).copy(alpha = 0.35f)
-            }
-
-            val pillTextColor = when (status) {
-                RecognitionStatus.SUCCESS -> Color(0xFF6EE7B7)
-                RecognitionStatus.FAILURE -> Color(0xFFFDA4AF)
-                RecognitionStatus.ALIGNING -> Color(0xFFFDE68A)
-                RecognitionStatus.FACE_STABLE, RecognitionStatus.VERIFYING -> Color(0xFF67E8F9)
-                else -> Color(0xFFE2E8F0)
-            }
-
-            val pingDotColor = when (status) {
-                RecognitionStatus.SUCCESS -> Color(0xFF10B981)
-                RecognitionStatus.FAILURE -> Color(0xFFEF4444)
-                RecognitionStatus.ALIGNING -> Color(0xFFF59E0B)
-                RecognitionStatus.FACE_STABLE, RecognitionStatus.VERIFYING -> Color(0xFF06B6D4)
-                else -> Color(0xFF38BDF8)
-            }
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 12.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(pillBg)
-                    .border(1.dp, pillBorder, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(pingDotColor)
-                            .alpha(pulseAlpha)
-                    )
-
-                    val statusLabel = when (status) {
-                        RecognitionStatus.IDLE -> "Đang tìm khuôn mặt..."
-                        RecognitionStatus.FACE_DETECTED -> "Đã phát hiện khuôn mặt"
-                        RecognitionStatus.ALIGNING -> "Đang căn chỉnh vị trí..."
-                        RecognitionStatus.FACE_STABLE -> "Giữ yên khuôn mặt..."
-                        RecognitionStatus.VERIFYING -> "Đang đối chiếu AI..."
-                        RecognitionStatus.SUCCESS -> "Đã xác thực danh tính 100%"
-                        RecognitionStatus.FAILURE -> "Không tìm thấy thông tin nhân viên"
-                        RecognitionStatus.COOLDOWN -> "Đã ghi nhận"
-                        else -> confidenceText
-                    }
-
-                    Text(
-                        text = statusLabel,
-                        color = pillTextColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    if (estimatedDistance != "---" && estimatedDistance.isNotBlank()) {
-                        Text(
-                            text = "•",
-                            color = pillTextColor.copy(alpha = 0.5f),
-                            fontSize = 11.sp
+                        .fillMaxWidth(0.92f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xEE0F172A)) // slate-900 mờ 93% chống chói
+                        .border(
+                            width = 1.dp,
+                            color = ovalColor,
+                            shape = RoundedCornerShape(12.dp)
                         )
-                        Text(
-                            text = estimatedDistance,
-                            color = pillTextColor,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-
-            // 4. Hộp hướng dẫn vị trí & thông báo bảo mật ở đáy Camera (Position Hint Box & Security Notice)
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
-                    // Hộp thông báo kính mờ (Backdrop Blur Glass Box chuẩn Stitch)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFF0F172A).copy(alpha = 0.90f))
-                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(18.dp))
-                            .padding(horizontal = 14.dp, vertical = 9.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            // Circle icon con mắt quét
+                        // Status Dot / Spinner
+                        if (status == RecognitionStatus.VERIFYING) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF60A5FA),
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
                             Box(
                                 modifier = Modifier
-                                    .size(30.dp)
+                                    .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF3B82F6).copy(alpha = 0.20f)),
-                                contentAlignment = Alignment.Center
+                                    .background(ovalColor)
+                                    .alpha(if (isStableOrVerifying) 1f else pulseAlpha)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            val titleText = when {
+                                status == RecognitionStatus.VERIFYING -> "Đang đối chiếu AI..."
+                                status == RecognitionStatus.COOLDOWN -> "Đã ghi nhận chấm công"
+                                isStableOrVerifying -> "Khuôn mặt hợp lệ • Giữ yên"
+                                status == RecognitionStatus.ALIGNING -> "Đang căn chỉnh vị trí..."
+                                status == RecognitionStatus.FACE_DETECTED -> "Đã phát hiện khuôn mặt"
+                                else -> "Đang tìm khuôn mặt..."
+                            }
+
+                            Text(
+                                text = titleText,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+
+                            val subText = if (guidanceMessage.isNotBlank()) {
+                                guidanceMessage
+                            } else if (estimatedDistance != "---" && estimatedDistance.isNotBlank()) {
+                                "Khoảng cách: $estimatedDistance • Nhìn thẳng"
+                            } else {
+                                "Nhìn thẳng vào tâm khung oval để chấm công"
+                            }
+
+                            Text(
+                                text = subText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (isStableOrVerifying) Color(0xFFA7F3D0) else Color(0xFFFDE68A),
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+
+                // 2. CENTER AI OVAL GUIDE: Trong suốt hoàn toàn để người dùng nhìn rõ mặt mình
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.70f)
+                        .aspectRatio(0.82f)
+                        .clip(RoundedCornerShape(50))
+                        .drawBehind {
+                            drawOval(
+                                color = ovalColor,
+                                style = Stroke(
+                                    width = 3.dp.toPx(),
+                                    pathEffect = if (isStableOrVerifying) null else PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                                )
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Không có bất kỳ icon nào che giữa mặt!
+                }
+
+                // 3. BOTTOM HUD PROGRESS & SECURITY METER: Hiển thị tiến trình nhận diện thật sự
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xEE0F172A))
+                        .border(width = 1.dp, color = Color(0xFF334155), shape = RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 9.dp)
+                ) {
+                    val realProgress = stabilityProgress.coerceIn(0f, 1f)
+                    val percentText = (realProgress * 100).toInt()
+
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Visibility,
-                                    contentDescription = null,
-                                    tint = Color(0xFF60A5FA),
-                                    modifier = Modifier.size(16.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(if (realProgress > 0f) Color(0xFF10B981) else Color(0xFF64748B))
+                                )
+                                Text(
+                                    text = when {
+                                        status == RecognitionStatus.VERIFYING -> "AI đang xác thực danh tính..."
+                                        realProgress > 0f -> "Tiến độ nhận diện khuôn mặt"
+                                        else -> "Đưa khuôn mặt vào khung oval"
+                                    },
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (realProgress > 0f) Color(0xFFF1F5F9) else Color(0xFF94A3B8)
                                 )
                             }
 
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = guidanceMessage,
-                                    color = Color(0xFFF1F5F9),
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = if (estimatedDistance != "---" && estimatedDistance.isNotBlank()) {
-                                        "Khoảng cách hiện tại: $estimatedDistance • Nhìn thẳng"
-                                    } else {
-                                        "Vui lòng giữ khuôn mặt bên trong khung oval"
-                                    },
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Normal
+                            Text(
+                                text = if (realProgress > 0f) "$percentText%" else "AI Sẵn sàng",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (realProgress > 0f) Color(0xFF34D399) else Color(0xFF64748B)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Progress Track
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Color(0xFF1E293B))
+                        ) {
+                            if (realProgress > 0f) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(realProgress)
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(Color(0xFF10B981))
                                 )
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Dòng bảo mật On-Device
+                        Text(
+                            text = "Nhận diện AI On-Device • Offline • AES-256",
+                            color = Color(0xFF64748B),
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Dòng thông báo công nghệ On-Device Offline AES-256
-                    Text(
-                        text = "Nhận diện AI On-Device • Offline • AES-256",
-                        color = Color.White.copy(alpha = 0.65f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center
-                    )
                 }
+            }
         }
     }
 }

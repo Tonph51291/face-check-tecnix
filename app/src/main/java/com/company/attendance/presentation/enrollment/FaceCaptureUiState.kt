@@ -4,7 +4,8 @@ import android.graphics.Bitmap
 import androidx.compose.runtime.Immutable
 
 /**
- * UI State cho màn hình đăng ký khuôn mặt đa mẫu tự động (Smart Multi-Shot Auto-Capture).
+ * UI State thuần túy cho màn hình đăng ký khuôn mặt đa mẫu tự động (Smart Multi-Shot Auto-Capture).
+ * Tách biệt hoàn toàn khỏi các side-effects điều hướng và lifecycle.
  */
 @Immutable
 data class FaceCaptureUiState(
@@ -17,9 +18,9 @@ data class FaceCaptureUiState(
     val distanceText: String = "Khoảng cách hợp lệ (65 cm) • Độ sáng: Tốt",
     val isFaceAligned: Boolean = false,
     val isUploading: Boolean = false,
-    val isCompleted: Boolean = false,
     val errorMessage: String? = null,
-    val lastCapturedBitmap: Bitmap? = null
+    val lastCapturedBitmap: Bitmap? = null,
+    val lastQualityMetrics: com.company.attendance.domain.model.FaceQualityMetrics? = null
 ) {
     val stepTitle: String
         get() = when (currentStep) {

@@ -63,6 +63,8 @@ data class AttendanceUiState(
     val selectedEmployee: com.company.attendance.domain.model.Employee? = null,
     val capturedFaceScore: Int = 98,
     val capturedBitmap: android.graphics.Bitmap? = null,
+    val faceQualityMetrics: com.company.attendance.domain.model.FaceQualityMetrics? = null,
+    val shouldRefreshEmployeeList: Boolean = false,
 
     // Đồng hồ thời gian thực
     val currentTimeString: String = "08:00:00",

@@ -60,11 +60,12 @@ fun EmployeeDetailScreen(
     onStartFaceCapture: () -> Unit,
     modifier: Modifier = Modifier,
     capturedBitmap: Bitmap? = null,
+    forceRefresh: Boolean = false,
     viewModel: EmployeeDetailViewModel = viewModel()
 ) {
-    // 1. Kích hoạt lấy dữ liệu (tự động dùng LRU Cache nếu có, không ép gọi mạng)
-    LaunchedEffect(employeeId) {
-        viewModel.loadEmployeeDetail(employeeId, forceRefresh = false)
+    // 1. Kích hoạt lấy dữ liệu (tự động dùng LRU Cache nếu có, ép làm mới nếu forceRefresh = true)
+    LaunchedEffect(employeeId, forceRefresh) {
+        viewModel.loadEmployeeDetail(employeeId, forceRefresh = forceRefresh)
     }
 
     // 2. Thu thập UI State
