@@ -8,16 +8,15 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 
 /**
- * Retrofit Interface định nghĩa các endpoint chấm công:
- * Kết nối trực tiếp tới Backend FaceCheck AI Service.
+ * Retrofit Interface định nghĩa các endpoint chấm công Kiosk:
+ * Route: POST /attendance/check-in
  */
 interface AttendanceApi {
 
     /**
      * Nhận diện khuôn mặt và ghi nhận chấm công tự động trên thiết bị Kiosk.
-     * Route: POST /api/v1/attendance/check-in
      */
-    @POST("api/v1/attendance/check-in")
+    @POST("attendance/check-in")
     suspend fun checkIn(
         @Body request: AttendanceCheckInRequestDto,
         @Header("Idempotency-Key") idempotencyKey: String? = null

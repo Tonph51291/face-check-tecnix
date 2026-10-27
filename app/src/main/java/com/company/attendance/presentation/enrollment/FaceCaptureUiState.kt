@@ -18,6 +18,7 @@ data class FaceCaptureUiState(
     val distanceText: String = "Khoảng cách hợp lệ (65 cm) • Độ sáng: Tốt",
     val isFaceAligned: Boolean = false,
     val isUploading: Boolean = false,
+    val isBlockedDuplicate: Boolean = false,
     val errorMessage: String? = null,
     val lastCapturedBitmap: Bitmap? = null,
     val lastQualityMetrics: com.company.attendance.domain.model.FaceQualityMetrics? = null

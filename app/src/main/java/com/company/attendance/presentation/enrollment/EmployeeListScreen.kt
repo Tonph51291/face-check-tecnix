@@ -83,12 +83,16 @@ fun EmployeeSearchScreen(
         }
     }
 
+    val onEventStable = androidx.compose.runtime.remember(viewModel) { { event: EnrollmentUiEvent -> viewModel.onEvent(event) } }
+    val onNavigateBackStable = androidx.compose.runtime.remember(onNavigateBack) { onNavigateBack }
+    val onEmployeeSelectedStable = androidx.compose.runtime.remember(onEmployeeSelected) { onEmployeeSelected }
+
     EmployeeSearchContent(
         uiState = uiState,
         pagingEmployees = pagingEmployees,
-        onEvent = viewModel::onEvent,
-        onNavigateBack = onNavigateBack,
-        onEmployeeSelected = onEmployeeSelected,
+        onEvent = onEventStable,
+        onNavigateBack = onNavigateBackStable,
+        onEmployeeSelected = onEmployeeSelectedStable,
         modifier = modifier
     )
 }
@@ -397,14 +401,14 @@ fun EmployeeSearchContent(
                         else -> {
                             items(
                                 count = pagingEmployees.itemCount,
-                                key = { index -> pagingEmployees[index]?.id ?: "employee_$index" }
+                                key = { index -> pagingEmployees.peek(index)?.id?.takeIf { it.isNotBlank() } ?: "employee_key_$index" }
                             ) { index ->
                                 val employee = pagingEmployees[index]
                                 if (employee != null) {
                                     EmployeeListItemCard(
                                         employee = employee,
                                         onClick = {
-                                            onEmployeeSelected(employee.code.ifBlank { employee.id })
+                                            onEmployeeSelected(employee.id.ifBlank { employee.code })
                                         },
                                         modifier = Modifier.fillMaxWidth()
                                     )

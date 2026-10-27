@@ -53,12 +53,22 @@ fun ProfileOverviewCard(
     capturedBitmap: Bitmap? = null,
     modifier: Modifier = Modifier
 ) {
-    val avatarGradient = Brush.linearGradient(
-        listOf(Color(0xFF2563EB), Color(0xFF1D4ED8), Color(0xFF3730A3))
-    )
+    val avatarGradient = androidx.compose.runtime.remember {
+        Brush.linearGradient(
+            listOf(Color(0xFF2563EB), Color(0xFF1D4ED8), Color(0xFF3730A3))
+        )
+    }
 
-    val initial = employee.avatarInitials.ifBlank {
-        employee.name.trim().split(" ").lastOrNull()?.take(1)?.uppercase() ?: employee.name.take(1).uppercase()
+    val initial = androidx.compose.runtime.remember(employee.avatarInitials, employee.name) {
+        employee.avatarInitials.ifBlank {
+            val trimmed = employee.name.trim()
+            val spaceIdx = trimmed.lastIndexOf(' ')
+            if (spaceIdx > 0 && spaceIdx < trimmed.length - 1) {
+                "${trimmed.first().uppercaseChar()}${trimmed[spaceIdx + 1].uppercaseChar()}"
+            } else {
+                trimmed.take(2).uppercase()
+            }
+        }
     }
 
     Box(
@@ -238,7 +248,7 @@ fun ProfileOverviewCard(
                     iconBg = Color(0xFFE0E7FF).copy(alpha = 0.6f),
                     iconTint = Color(0xFF4F46E5),
                     label = "SỐ ĐIỆN THOẠI",
-                    value = employee.phone,
+                    value = employee.phone.ifBlank { "*****" },
                     modifier = Modifier.weight(1f)
                 )
                 MetricPill(
@@ -246,7 +256,7 @@ fun ProfileOverviewCard(
                     iconBg = Color(0xFFCCFBF1).copy(alpha = 0.6f),
                     iconTint = Color(0xFF0D9488),
                     label = "GIA NHẬP",
-                    value = employee.joinDate,
+                    value = employee.joinDate.ifBlank { "*****" },
                     modifier = Modifier.weight(1f)
                 )
             }

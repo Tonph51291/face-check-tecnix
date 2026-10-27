@@ -34,11 +34,13 @@ import androidx.compose.ui.unit.sp
 import com.company.attendance.domain.model.Employee
 import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 
+import androidx.compose.runtime.remember
+
 /**
  * Thẻ nhân viên chuẩn Stitch (rounded-2xl, border-slate-200/70, shadow-card).
  * - Avatar: Bo góc 12dp, gradient chuyển màu hiện đại, chữ cái viết tắt.
  * - Mã NV: Chip blue-50 viền blue-100.
- * - Tag trạng thái: Emerald (Đã có mẫu mặt) hoặc Rose (Chưa có mẫu mặt).
+ * - Tag trạng thái: Emerald (Đã có mẫu mặt / is_face_enrolled == true) hoặc Rose (Chưa có mẫu mặt).
  * - Nút xem chi tiết: Bo tròn 36dp viền slate-200/50.
  */
 @Composable
@@ -47,20 +49,28 @@ fun EmployeeListItemCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val gradientIndex = (employee.avatarColorIndex.takeIf { it >= 0 }
-        ?: employee.name.hashCode().let { kotlin.math.abs(it) }) % EnrollmentColors.AvatarGradients.size
+    val gradientIndex = remember(employee.avatarColorIndex, employee.name) {
+        (employee.avatarColorIndex.takeIf { it >= 0 }
+            ?: kotlin.math.abs(employee.name.hashCode())) % EnrollmentColors.AvatarGradients.size
+    }
     val avatarGradient = EnrollmentColors.AvatarGradients[gradientIndex]
 
-    val initials = employee.avatarInitials.ifBlank {
-        val parts = employee.name.trim().split(" ")
-        if (parts.size >= 2) {
-            "${parts.first().firstOrNull()?.uppercaseChar() ?: ""}${parts.last().firstOrNull()?.uppercaseChar() ?: ""}"
-        } else {
-            employee.name.take(2).uppercase()
+    val initials = remember(employee.avatarInitials, employee.name) {
+        employee.avatarInitials.ifBlank {
+            val trimmed = employee.name.trim()
+            val spaceIdx = trimmed.lastIndexOf(' ')
+            if (spaceIdx > 0 && spaceIdx < trimmed.length - 1) {
+                "${trimmed.first().uppercaseChar()}${trimmed[spaceIdx + 1].uppercaseChar()}"
+            } else {
+                trimmed.take(2).uppercase()
+            }
         }
     }
 
-    val cardBorderColor = if (!employee.hasFaceSample) {
+    // Kiểm tra trạng thái đăng ký sinh trắc học dựa trên isFaceEnrolled từ API backend
+    val isEnrolled = employee.isFaceEnrolled || employee.hasFaceSample
+
+    val cardBorderColor = if (!isEnrolled) {
         EnrollmentColors.WarningTagBorder.copy(alpha = 0.6f)
     } else {
         EnrollmentColors.OutlineVariant.copy(alpha = 0.7f)
@@ -145,8 +155,8 @@ fun EmployeeListItemCard(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Tag trạng thái mẫu khuôn mặt
-                    if (employee.hasFaceSample) {
+                    // Tag trạng thái mẫu khuôn mặt (sử dụng is_face_enrolled từ API)
+                    if (isEnrolled) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -165,7 +175,7 @@ fun EmployeeListItemCard(
                             Text(
                                 text = "Đã có mẫu mặt",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
+                                fontWeight = FontWeight.SemiBold,
                                 color = EnrollmentColors.SuccessTagText
                             )
                         }
@@ -188,7 +198,7 @@ fun EmployeeListItemCard(
                             Text(
                                 text = "Chưa có mẫu mặt",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
+                                fontWeight = FontWeight.SemiBold,
                                 color = EnrollmentColors.WarningTagText
                             )
                         }

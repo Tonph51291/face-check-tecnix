@@ -1,5 +1,6 @@
 package com.company.attendance.data.repository
- 
+
+import android.util.Log
 import androidx.collection.LruCache
 import com.company.attendance.core.logging.logApi
 import com.company.attendance.core.logging.logD
@@ -17,16 +18,14 @@ import com.company.attendance.domain.model.Employee
 import com.company.attendance.domain.model.EmployeeDetail
 import com.company.attendance.domain.repository.EmployeeRepository
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.Response
 import java.io.IOException
 
 /**
- * Triển khai EmployeeRepository kết nối trực tiếp với Backend FaceCheck AI Service.
- * - Dữ liệu thực 100% từ Server.
- * - Tối ưu hóa: Bắt trực tiếp thông điệp tiếng Việt từ API response của Backend (chuẩn OpenAPI).
- * - Tích hợp LRU Cache bộ nhớ đệm (15 hồ sơ nhân sự).
+ * Triển khai EmployeeRepository kết nối trực tiếp với Backend Golang tecnix-office.
  */
 class EmployeeRepositoryImpl(
     private val employeeApi: EmployeeApi = NetworkModule.employeeApi
@@ -46,12 +45,29 @@ class EmployeeRepositoryImpl(
     ): Result<List<Employee>> = withContext(Dispatchers.IO) {
         safeApiCall {
             val apiQuery = query?.trim()?.ifEmpty { null }
-            val apiDept = if (department == "Tất cả" || department.isNullOrBlank()) null else department
+            val response = employeeApi.getEmployees(
+                search = apiQuery,
+                departmentId = null,
+                page = page,
+                pageSize = limit
+            )
 
-            val response = employeeApi.getEmployees(apiQuery, apiDept, page, limit)
             if (response.isSuccessful) {
-                val list = response.body()?.data?.toDomain().orEmpty()
-                logApi("/api/v1/employees", "200 OK", "Nhận ${list.size} nhân sự")
+                val rawEmployees = response.body()?.employees ?: response.body()?.data.orEmpty()
+                val domainList = rawEmployees.toDomain()
+                val list = if (!department.isNullOrBlank() && department != "Tất cả") {
+                    val filtered = ArrayList<Employee>(domainList.size)
+                    for (i in domainList.indices) {
+                        val emp = domainList[i]
+                        if (emp.department.contains(department, ignoreCase = true)) {
+                            filtered.add(emp)
+                        }
+                    }
+                    filtered
+                } else {
+                    domainList
+                }
+                logApi("/users", "200 OK", "Nhận ${list.size} nhân sự (tổng: ${rawEmployees.size})")
                 Result.Success(list)
             } else {
                 val errorMsg = response.extractErrorMessage("Lỗi tải danh sách nhân viên")
@@ -85,11 +101,11 @@ class EmployeeRepositoryImpl(
 
         safeApiCall {
             val response = employeeApi.getEmployeeDetail(id)
-            val empDto = response.body()?.data
+            val empDto = response.body()
             if (response.isSuccessful && empDto != null) {
                 val detail = empDto.toDetail()
                 employeeDetailCache.put(id, detail)
-                logApi("/api/v1/employees/$id", "200 OK", "Lưu LRU Cache (size=${employeeDetailCache.size()})")
+                logApi("/users/$id", "200 OK", "Lưu LRU Cache (size=${employeeDetailCache.size()})")
                 Result.Success(detail)
             } else {
                 val errorMsg = response.extractErrorMessage("Không tìm thấy nhân viên $id")
@@ -107,28 +123,44 @@ class EmployeeRepositoryImpl(
 
     override suspend fun enrollFaceSample(
         employeeId: String,
-        imageBase64: String
+        imageBase64: String,
+        sampleIndex: Int?
     ): Result<EnrollFaceDataDto> = withContext(Dispatchers.IO) {
         safeApiCall {
             val response = employeeApi.enrollFace(
                 id = employeeId,
-                request = EnrollFaceRequestDto(faceImageBase64 = imageBase64)
+                request = EnrollFaceRequestDto(
+                    sampleIndex = sampleIndex,
+                    faceImageBase64 = imageBase64
+                )
             )
 
-            val enrollData = response.body()?.data
-            if (response.isSuccessful && enrollData != null) {
+            val body = response.body()
+
+            if (response.isSuccessful && body != null) {
                 employeeDetailCache.remove(employeeId)
+                val enrollData = EnrollFaceDataDto(
+                    employeeId = body.userId?.toString() ?: body.id?.toString() ?: employeeId,
+                    hasFaceSample = body.effectiveIsDone,
+                    sampleCount = body.effectiveSampleCount,
+                    requiredSamples = body.totalSamples ?: 3,
+                    message = body.message
+                )
                 logApi(
-                    "/api/v1/employees/$employeeId/enroll-face",
+                    "/users/$employeeId/enroll-face",
                     "200 OK",
-                    "Mẫu: ${enrollData.sampleCount}/${enrollData.requiredSamples}, Đã kích hoạt: ${enrollData.hasFaceSample}"
+                    "Mẫu: ${enrollData.sampleCount}/${enrollData.requiredSamples}, Hoàn tất: ${enrollData.hasFaceSample}, Msg: ${body.message}"
                 )
                 Result.Success(enrollData)
             } else {
-                // Tận dụng message tiếng Việt chính xác trả về từ Backend AI Service theo OpenAPI
                 val errorMsg = response.extractErrorMessage("Không thể lưu mẫu khuôn mặt")
                 logE("Lỗi đăng ký mẫu [${response.code()}]: $errorMsg")
-                Result.Error(AppError.NetworkError(errorMsg))
+                val appError = if (response.code() == 409) {
+                    AppError.EmployeeAlreadyEnrolled(errorMsg)
+                } else {
+                    AppError.NetworkError(errorMsg)
+                }
+                Result.Error(appError)
             }
         }
     }
@@ -138,21 +170,23 @@ class EmployeeRepositoryImpl(
             val response = employeeApi.deleteFaceSamples(employeeId)
             if (response.isSuccessful) {
                 employeeDetailCache.remove(employeeId)
+                logApi("/users/$employeeId/face-samples", "200 OK", "Đã xóa toàn bộ mẫu khuôn mặt")
             }
             Result.Success(response.isSuccessful)
         }
     }
 
     /**
-     * Trích xuất thông báo lỗi trực tiếp từ JSON response của Server theo chuẩn ApiErrorResponseDto.
+     * Trích xuất thông báo lỗi trực tiếp từ JSON response của Server theo chuẩn RFC-7807 (Huma Golang backend).
      */
     private fun Response<*>.extractErrorMessage(defaultMsg: String): String {
         val raw = errorBody()?.string() ?: return message().ifBlank { "$defaultMsg (${code()})" }
         return try {
-            gson.fromJson(raw, ApiErrorResponseDto::class.java)?.message?.takeIf { it.isNotBlank() }
+            val rfcError = gson.fromJson(raw, com.company.attendance.data.remote.dto.Rfc7807ErrorDto::class.java)
+            rfcError?.userFriendlyMessage?.takeIf { it.isNotBlank() }
                 ?: message().ifBlank { "$defaultMsg (${code()})" }
         } catch (_: Exception) {
-            raw.take(120).ifBlank { "$defaultMsg (${code()})" }
+            raw.take(160).ifBlank { "$defaultMsg (${code()})" }
         }
     }
 
@@ -163,9 +197,9 @@ class EmployeeRepositoryImpl(
         return try {
             action()
         } catch (e: IOException) {
-            logE("Mất kết nối máy chủ AI (${NetworkModule.BASE_URL})", e)
+            logE("Mất kết nối máy chủ (${NetworkModule.BASE_URL})", e)
             Result.Error(
-                AppError.NetworkError("Không thể kết nối đến máy chủ AI (${NetworkModule.BASE_URL}). Vui lòng kiểm tra server."),
+                AppError.NetworkError("Không thể kết nối đến máy chủ (${NetworkModule.BASE_URL}). Vui lòng kiểm tra server."),
                 e
             )
         } catch (e: Exception) {

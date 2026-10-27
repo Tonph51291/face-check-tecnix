@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.min
+import com.company.attendance.domain.ml.ClearanceDecision
+import com.company.attendance.domain.ml.FaceClearanceGatekeeper
 
 /**
  * Hiệu ứng một lần (One-off Navigation & UI Effects) cho màn hình FaceCapture
@@ -40,11 +42,14 @@ sealed interface FaceCaptureEffect {
 /**
  * ViewModel điều khiển quy trình Smart Auto-Capture & Multi-shot Face Enrollment (3 mẫu).
  * Tích hợp tự động nhận diện ổn định (Face Stability Detection), chụp tự động và gửi Base64 lên AI Server.
+ * Tích hợp FaceClearanceGatekeeper để chặn hoàn toàn việc spam request khi bị trùng mặt 409 cho đến khi đổi người.
  * Điều hướng được phát qua Channel/Flow effect để tách biệt hoàn toàn khỏi Compose UI.
  */
 class FaceCaptureViewModel(
     private val employeeRepository: EmployeeRepository = RepositoryModule.employeeRepository
 ) : ViewModel() {
+
+    private val clearanceGatekeeper = FaceClearanceGatekeeper()
 
     private val _uiState = MutableStateFlow(FaceCaptureUiState())
     val uiState: StateFlow<FaceCaptureUiState> = _uiState.asStateFlow()
@@ -64,6 +69,7 @@ class FaceCaptureViewModel(
         if (employeeId.isBlank()) return
         cooldownJob?.cancel()
         isCoolingDown = false
+        clearanceGatekeeper.reset()
         _uiState.update {
             it.copy(
                 employeeId = employeeId,
@@ -74,6 +80,7 @@ class FaceCaptureViewModel(
                 lastCapturedBitmap = null,
                 isUploading = false,
                 isFaceAligned = false,
+                isBlockedDuplicate = false,
                 guidanceText = "Nhìn thẳng vào camera và giữ yên khuôn mặt",
                 distanceText = "Khoảng cách hợp lệ (65 cm) • Độ sáng: Tốt"
             )
@@ -105,17 +112,52 @@ class FaceCaptureViewModel(
 
     /**
      * Xử lý từng frame từ ML Kit thời gian thực.
-     * Tự động tính toán độ ổn định (stability) trong ~1.2 giây để kích hoạt auto-capture.
+     * Tích hợp kiểm soát đổi người (FaceClearanceGatekeeper) để chặn đứng việc gửi request lặp lại nếu trùng mặt.
      */
     fun onFaceFrame(faceData: FaceDetectionData?) {
         this.latestFaceData = faceData
-        logD("face Data $faceData")
         val state = _uiState.value
-        if (state.isUploading || isCoolingDown) {
+        if (state.isUploading) {
             return
         }
 
-        // 1. Không phát hiện khuôn mặt
+        // 1. Kiểm tra quyết định từ FaceClearanceGatekeeper (Thuật toán tách biệt khỏi UI)
+        val clearanceDecision = clearanceGatekeeper.evaluate(faceData)
+        when (clearanceDecision) {
+            is ClearanceDecision.Blocked -> {
+                _uiState.update {
+                    it.copy(
+                        isFaceAligned = false,
+                        stabilityProgress = 0f,
+                        isBlockedDuplicate = true,
+                        guidanceText = clearanceDecision.reason,
+                        distanceText = "Chặn khuôn mặt đã tồn tại"
+                    )
+                }
+                return
+            }
+            is ClearanceDecision.Cleared -> {
+                _uiState.update {
+                    it.copy(
+                        isBlockedDuplicate = false,
+                        errorMessage = null,
+                        guidanceText = clearanceDecision.message,
+                        distanceText = "Sẵn sàng đón người mới"
+                    )
+                }
+            }
+            ClearanceDecision.Allowed -> {
+                if (state.isBlockedDuplicate) {
+                    _uiState.update { it.copy(isBlockedDuplicate = false) }
+                }
+            }
+        }
+
+        if (isCoolingDown) {
+            return
+        }
+
+        // 2. Không phát hiện khuôn mặt
         if (faceData == null) {
             _uiState.update {
                 it.copy(
@@ -128,7 +170,7 @@ class FaceCaptureViewModel(
             return
         }
 
-        // 2. Khuôn mặt chưa căn chỉnh chuẩn theo oval
+        // 3. Khuôn mặt chưa căn chỉnh chuẩn theo oval
         if (faceData.alignmentStatus != FaceAlignmentStatus.ALIGNED) {
             _uiState.update {
                 it.copy(
@@ -222,14 +264,19 @@ class FaceCaptureViewModel(
                 val base64 = bitmap.toBase64Jpeg(quality = 85, maxDimension = 1080)
                 val empId = state.employeeId
 
-                val result = employeeRepository.enrollFaceSample(empId, base64)
+                val result = employeeRepository.enrollFaceSample(
+                    employeeId = empId,
+                    imageBase64 = base64,
+                    sampleIndex = state.currentStep
+                )
                 when (result) {
                     is Result.Success -> {
                         val enrollData = result.data
                         val newSampleCount = enrollData.sampleCount
-                        val isDone = enrollData.hasFaceSample || newSampleCount >= 3
+                        val isDone = enrollData.hasFaceSample || newSampleCount >= (enrollData.requiredSamples.takeIf { it > 0 } ?: 3)
+                        val serverMsg = enrollData.message?.takeIf { it.isNotBlank() }
 
-                        logI("Đăng ký mẫu thành công: $newSampleCount/${enrollData.requiredSamples}, Hoàn tất: $isDone")
+                        logI("Đăng ký mẫu thành công: $newSampleCount/${enrollData.requiredSamples}, Hoàn tất: $isDone. Server: $serverMsg")
 
                         if (isDone) {
                             _uiState.update {
@@ -240,7 +287,7 @@ class FaceCaptureViewModel(
                                     stabilityProgress = 1f,
                                     lastCapturedBitmap = bitmap,
                                     lastQualityMetrics = qualityMetrics,
-                                    guidanceText = "Đăng ký thành công trọn bộ 3 mẫu sinh trắc học!"
+                                    guidanceText = serverMsg ?: "Đã hoàn tất đăng ký đủ 3 mẫu khuôn mặt cho nhân viên"
                                 )
                             }
                             _effect.send(FaceCaptureEffect.NavigateToReview(bitmap, qualityMetrics))
@@ -254,7 +301,7 @@ class FaceCaptureViewModel(
                                     stabilityProgress = 0f,
                                     lastCapturedBitmap = bitmap,
                                     lastQualityMetrics = qualityMetrics,
-                                    guidanceText = "Lưu mẫu $newSampleCount/3 thành công! Chuẩn bị bước $nextStep..."
+                                    guidanceText = serverMsg ?: "Đã lưu mẫu khuôn mặt số $newSampleCount thành công ($newSampleCount/3)"
                                 )
                             }
 
@@ -265,16 +312,42 @@ class FaceCaptureViewModel(
 
                     is Result.Error -> {
                         val errorMsg = result.error.message.ifBlank { "Máy chủ từ chối mẫu khuôn mặt. Vui lòng thử lại." }
-                        logE("Lỗi đăng ký mẫu: $errorMsg")
-                        _uiState.update {
-                            it.copy(
-                                isUploading = false,
-                                stabilityProgress = 0f,
-                                errorMessage = errorMsg,
-                                guidanceText = "Chưa nhận diện rõ. Vui lòng căn chỉnh lại và giữ yên."
+                        val isConflict = result.error is com.company.attendance.core.result.AppError.EmployeeAlreadyEnrolled ||
+                                errorMsg.contains("đã được đăng ký", ignoreCase = true) ||
+                                errorMsg.contains("trùng với", ignoreCase = true) ||
+                                errorMsg.contains("Conflict", ignoreCase = true) ||
+                                errorMsg.contains("409")
+
+                        logE("Lỗi đăng ký mẫu (isConflict=$isConflict): $errorMsg")
+
+                        if (isConflict) {
+                            // Chặn cứng thông qua Gatekeeper (Thuật toán kiểm soát đổi người)
+                            clearanceGatekeeper.blockFace(
+                                trackingId = latestFaceData?.trackingId,
+                                reason = errorMsg
                             )
+                            _uiState.update {
+                                it.copy(
+                                    isUploading = false,
+                                    stabilityProgress = 0f,
+                                    isFaceAligned = false,
+                                    isBlockedDuplicate = true,
+                                    errorMessage = errorMsg,
+                                    guidanceText = errorMsg,
+                                    distanceText = "Vui lòng rời khỏi camera để đổi người"
+                                )
+                            }
+                        } else {
+                            _uiState.update {
+                                it.copy(
+                                    isUploading = false,
+                                    stabilityProgress = 0f,
+                                    errorMessage = errorMsg,
+                                    guidanceText = errorMsg
+                                )
+                            }
+                            startCooldown(1200)
                         }
-                        startCooldown(1200)
                     }
                 }
             } catch (e: Exception) {
@@ -302,7 +375,14 @@ class FaceCaptureViewModel(
     }
 
     fun dismissError() {
-        _uiState.update { it.copy(errorMessage = null) }
+        clearanceGatekeeper.reset()
+        _uiState.update {
+            it.copy(
+                errorMessage = null,
+                isBlockedDuplicate = false,
+                guidanceText = "Nhìn thẳng vào camera và giữ yên khuôn mặt"
+            )
+        }
     }
 
     /**
@@ -314,9 +394,11 @@ class FaceCaptureViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isUploading = true, errorMessage = null) }
             employeeRepository.deleteFaceSamples(empId)
+            clearanceGatekeeper.reset()
             _uiState.update {
                 it.copy(
                     isUploading = false,
+                    isBlockedDuplicate = false,
                     currentStep = 1,
                     sampleCount = 0,
                     stabilityProgress = 0f,

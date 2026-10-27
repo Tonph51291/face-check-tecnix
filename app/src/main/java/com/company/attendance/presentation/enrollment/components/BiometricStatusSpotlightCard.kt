@@ -48,7 +48,8 @@ fun BiometricStatusSpotlightCard(
     onStartFaceCapture: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (employee.hasFaceSample) {
+    val isEnrolled = employee.isFaceEnrolled || employee.hasFaceSample
+    if (isEnrolled) {
         EnrolledBiometricCard(
             onRecapture = onStartFaceCapture,
             modifier = modifier

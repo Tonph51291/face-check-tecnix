@@ -2,6 +2,7 @@ package com.company.attendance.di
 
 import com.company.attendance.data.remote.api.AttendanceApi
 import com.company.attendance.data.remote.api.EmployeeApi
+import com.example.facechecktecnix.BuildConfig
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -11,27 +12,32 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Cấu hình chung cho toàn bộ kết nối API (Network Config) của hệ thống Kiosk FaceCheckTecnix.
- * Kết nối trực tiếp tới Backend FaceCheck AI Service chạy local.
+ * Tự động đọc cấu hình động từ file .env qua BuildConfig.
  */
 object NetworkModule {
 
     /**
-     * Địa chỉ Backend FaceCheck AI Service:
-     * - Khi chạy trên Android Emulator: dùng "http://10.0.2.2:8000/" (10.0.2.2 trỏ về localhost máy tính host)
-     * - Khi chạy trên Tablet/Điện thoại thật cùng mạng Wi-Fi: thay bằng IP LAN máy tính, ví dụ: "http://192.168.1.100:8000/"
+     * Địa chỉ Backend Golang tecnix-office (nạp tự động từ .env qua BuildConfig):
+     * - Khi chạy trên Android Emulator: http://10.0.2.2:8080/
+     * - Khi chạy trên Tablet thật: http://<IP_LAN>:8080/
      */
-    var BASE_URL: String = "http://10.0.2.2:8000/"
+    var BASE_URL: String = BuildConfig.KIOSK_BASE_URL
 
     /**
-     * API Key xác thực Kiosk (khớp với mục auth.api_keys trong config.yaml của backend)
+     * API Key xác thực Kiosk (nạp tự động từ .env qua BuildConfig)
      */
-    const val API_KEY: String = "dev-kiosk-key-change-me"
+    val DEVICE_API_KEY: String = BuildConfig.KIOSK_DEVICE_API_KEY
 
-    // 1. Interceptor gắn Header Authorization Bearer và Content-Type vào mọi request
+    /**
+     * Mã serial máy Kiosk
+     */
+    val DEVICE_SERIAL: String = BuildConfig.KIOSK_DEVICE_SERIAL
+
+    // 1. Interceptor gắn Header X-Device-Key và Accept JSON theo đúng đặc tả Dual-Auth của backend
     private val authInterceptor = Interceptor { chain ->
         val original = chain.request()
         val requestBuilder = original.newBuilder()
-            .header("Authorization", "Bearer $API_KEY")
+            .header("X-Device-Key", DEVICE_API_KEY)
             .header("Accept", "application/json")
             .method(original.method, original.body)
         chain.proceed(requestBuilder.build())

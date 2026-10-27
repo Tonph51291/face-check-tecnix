@@ -32,12 +32,16 @@ class EnrollmentViewModel(
     private val listEmployeeUseCase: ListEmployeeUseCase = ListEmployeeUseCase(RepositoryModule.employeeRepository)
 ) : ViewModel() {
 
+    private val _searchQuery = MutableStateFlow("")
+    private val _selectedDepartment = MutableStateFlow("Tất cả")
+
     private val _uiState = MutableStateFlow(EnrollmentUiState())
     val uiState: StateFlow<EnrollmentUiState> = _uiState.asStateFlow()
 
+    // Tối ưu hóa: Tránh sử dụng Flow.map trung gian, lắng nghe trực tiếp luồng tìm kiếm và phòng ban
     val employeesPagingFlow: Flow<PagingData<Employee>> = combine(
-        _uiState.map { it.searchQuery }.distinctUntilChanged().debounce { if (it.isEmpty()) 0L else 300L },
-        _uiState.map { it.selectedDepartment }.distinctUntilChanged()
+        _searchQuery.debounce { if (it.isEmpty()) 0L else 300L },
+        _selectedDepartment
     ) { query, dept ->
         Pair(query, dept)
     }
@@ -50,12 +54,15 @@ class EnrollmentViewModel(
     fun onEvent(event: EnrollmentUiEvent) {
         when (event) {
             is EnrollmentUiEvent.OnSearchQueryChanged -> {
+                _searchQuery.value = event.query
                 _uiState.update { it.copy(searchQuery = event.query) }
             }
             is EnrollmentUiEvent.OnSelectDepartment -> {
+                _selectedDepartment.value = event.department
                 _uiState.update { it.copy(selectedDepartment = event.department) }
             }
             is EnrollmentUiEvent.OnClearSearch -> {
+                _searchQuery.value = ""
                 _uiState.update { it.copy(searchQuery = "") }
             }
             is EnrollmentUiEvent.OnRefresh -> {

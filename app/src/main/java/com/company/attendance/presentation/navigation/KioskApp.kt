@@ -73,7 +73,7 @@ fun KioskApp(
 
         KioskScreen.EMPLOYEE_DETAIL -> {
             val activeEmployee = selectedEmployee ?: defaultFallbackEmployee
-            val empId = selectedEmployeeId ?: activeEmployee.code.ifBlank { activeEmployee.id }
+            val empId = selectedEmployeeId ?: activeEmployee.id.ifBlank { activeEmployee.code }
 
             EmployeeDetailScreen(
                 employeeId = empId,
@@ -127,13 +127,11 @@ fun KioskApp(
                 },
                 onConfirmEnrollment = { id ->
                     coroutineScope.launch {
-                        employeeRepository.enrollFaceSample(id, "")
                         val updated = employeeRepository.getEmployeeById(id).getOrNull()
-                        if (updated != null) {
-                            selectedEmployee = updated
-                        } else {
-                            selectedEmployee = activeEmployee.copy(hasFaceSample = true)
-                        }
+                        selectedEmployee = updated ?: activeEmployee.copy(
+                            isFaceEnrolled = true,
+                            hasFaceSample = true
+                        )
                         shouldRefreshEmployeeList = true
                         currentScreen = KioskScreen.EMPLOYEE_DETAIL
                     }

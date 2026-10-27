@@ -13,10 +13,12 @@ data class Employee(
     val department: String,
     val position: String = "Kỹ sư Phần mềm",
     val email: String = "an.nguyen@tecnix.vn",
-    val phone: String = "0912 345 678",
-    val joinDate: String = "15/03/2022",
+    val phone: String = "*****",
+    val joinDate: String = "*****",
     val status: String = "Đang làm việc",
-    val hasFaceSample: Boolean = false,
+    val isFaceEnrolled: Boolean = false,
+    val hasFaceSample: Boolean = isFaceEnrolled,
+    val avatarUrl: String = "",
     val avatarInitials: String = "",
     val avatarColorIndex: Int = 0
 )
@@ -28,8 +30,9 @@ val defaultFallbackEmployee = Employee(
     department = "Phòng Kỹ thuật & Công nghệ",
     position = "Kỹ sư Trưởng AI",
     email = "an.nguyen@tecnix.vn",
-    phone = "0912 345 678",
-    joinDate = "15/03/2022",
+    phone = "*****",
+    joinDate = "*****",
+    isFaceEnrolled = false,
     hasFaceSample = false,
     avatarInitials = "NA",
     avatarColorIndex = 0

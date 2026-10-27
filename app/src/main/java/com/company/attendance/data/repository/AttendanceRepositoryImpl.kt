@@ -49,13 +49,13 @@ class AttendanceRepositoryImpl(
             val idempotencyKey = UUID.randomUUID().toString()
             val request = AttendanceCheckInRequestDto(
                 capturedImageBase64 = imageBase64,
-                deviceSerial = DEFAULT_DEVICE_SERIAL,
+                deviceSerial = NetworkModule.DEVICE_SERIAL,
                 employeeId = null
             )
 
             val response = attendanceApi.checkIn(request, idempotencyKey)
             logD("CheckIn Response Code: ${response.code()}")
-            logApi("/api/v1/attendance/check-in", "HTTP ${response.code()}", "Success: ${response.isSuccessful}")
+            logApi("/attendance/check-in", "HTTP ${response.code()}", "Success: ${response.isSuccessful}")
 
             if (response.isSuccessful) {
                 val body = response.body()
@@ -79,7 +79,8 @@ class AttendanceRepositoryImpl(
                     null
                 }
 
-                val cleanMessage = parsedError?.message?.trim()?.ifBlank { null }
+                val cleanMessage = parsedError?.detail?.trim()?.ifBlank { null }
+                    ?: parsedError?.message?.trim()?.ifBlank { null }
                     ?: response.message().ifBlank { "Lỗi chấm công (${response.code()})" }
 
                 logE("Lỗi chấm công [HTTP ${response.code()}]: $cleanMessage")

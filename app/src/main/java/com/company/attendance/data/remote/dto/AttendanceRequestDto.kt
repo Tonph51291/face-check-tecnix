@@ -3,15 +3,21 @@ package com.company.attendance.data.remote.dto
 import com.google.gson.annotations.SerializedName
 
 /**
- * Data Transfer Object gửi yêu cầu chấm công khuôn mặt lên AI Service theo hợp đồng OpenAPI:
- * POST /api/v1/attendance/check-in
+ * Data Transfer Object gửi yêu cầu chấm công khuôn mặt lên Backend:
+ * POST /attendance/check-in
  */
 data class AttendanceCheckInRequestDto(
     @SerializedName("capturedImageBase64")
     val capturedImageBase64: String,
 
+    @SerializedName("image_base64")
+    val imageBase64: String? = null,
+
     @SerializedName("deviceSerial")
-    val deviceSerial: String? = "K1",
+    val deviceSerial: String? = "KIOSK-01",
+
+    @SerializedName("device_sn")
+    val deviceSn: String? = null,
 
     @SerializedName("employeeId")
     val employeeId: String? = null,

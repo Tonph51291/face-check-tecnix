@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
 }
+
+// Đọc cấu hình từ file .env ở thư mục gốc của project
+val envFile = rootProject.file(".env")
+val envProperties = Properties().apply {
+    if (envFile.exists()) {
+        envFile.inputStream().use { load(it) }
+    }
+}
+
+val kioskBaseUrl = envProperties.getProperty("KIOSK_BASE_URL", "http://10.0.2.2:8080/")
+val kioskDeviceApiKey = envProperties.getProperty("KIOSK_DEVICE_API_KEY", "a7f8c92b4e6d10f3a5b8c9d2e1f4a7b0c3d6e9f2a5b8c1d4e7f0a3b6c9d2e5f8")
+val kioskDeviceSerial = envProperties.getProperty("KIOSK_DEVICE_SERIAL", "KIOSK-01")
 
 android {
     namespace = "com.example.facechecktecnix"
@@ -16,6 +30,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Inject biến từ .env vào BuildConfig của Android
+        buildConfigField("String", "KIOSK_BASE_URL", "\"$kioskBaseUrl\"")
+        buildConfigField("String", "KIOSK_DEVICE_API_KEY", "\"$kioskDeviceApiKey\"")
+        buildConfigField("String", "KIOSK_DEVICE_SERIAL", "\"$kioskDeviceSerial\"")
     }
 
     buildTypes {
@@ -36,6 +55,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

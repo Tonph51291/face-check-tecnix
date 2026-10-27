@@ -32,7 +32,10 @@ object AttendanceMapper {
             timestamp = timestampMs,
             timeFormatted = dto.checkTime ?: synchronized(timeFormat) { timeFormat.format(now) },
             dateFormatted = synchronized(dateFormat) { dateFormat.format(now) },
-            matchScore = (dto.similarityScore ?: 0.95f) * 100f,
+            matchScore = run {
+                val raw = dto.similarityScore ?: 95f
+                if (raw <= 1.0f) raw * 100f else raw
+            },
             status = AttendanceStatus.fromKey(dto.attendanceStatus),
             attendanceType = AttendanceType.fromKey(dto.attendanceType),
             serverMessage = serverMessage,
