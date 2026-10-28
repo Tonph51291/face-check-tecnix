@@ -97,9 +97,9 @@ fun AttendanceScreen(
     val vignetteBrush = androidx.compose.runtime.remember {
         Brush.verticalGradient(
             colors = listOf(
-                Color.Black.copy(alpha = 0.25f),
+                Color.Black.copy(alpha = 0.05f),
                 Color.Transparent,
-                Color.Black.copy(alpha = 0.40f)
+                Color.Black.copy(alpha = 0.15f)
             )
         )
     }

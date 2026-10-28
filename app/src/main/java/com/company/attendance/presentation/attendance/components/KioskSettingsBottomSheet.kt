@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
@@ -28,7 +27,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -41,12 +39,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.company.attendance.presentation.attendance.AttendanceUiEvent
 import com.company.attendance.presentation.attendance.AttendanceUiState
-import com.company.attendance.presentation.common.theme.ErrorRed
-import com.company.attendance.presentation.common.theme.OnError
 import com.company.attendance.presentation.common.theme.OnPrimary
 import com.company.attendance.presentation.common.theme.OnSurfaceText
 import com.company.attendance.presentation.common.theme.OnSurfaceVariant
-import com.company.attendance.presentation.common.theme.OnTertiary
 import com.company.attendance.presentation.common.theme.PrimaryBlue
 import com.company.attendance.presentation.common.theme.SuccessGreen
 import com.company.attendance.presentation.common.theme.SurfaceContainer
@@ -263,133 +258,7 @@ fun KioskSettingsBottomSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
 
-            // Điều khiển chuyển đổi Camera Trước / Sau
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SurfaceContainerLow)
-                    .padding(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(PrimaryBlue.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Cameraswitch,
-                                contentDescription = null,
-                                tint = PrimaryBlue,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Camera đang sử dụng",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = OnSurfaceText
-                            )
-                            Text(
-                                text = if (uiState.isFrontCamera) "Camera trước (Mặc định)" else "Camera sau",
-                                fontSize = 12.sp,
-                                color = OnSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = { onEvent(AttendanceUiEvent.OnSwitchCamera) },
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
-                    ) {
-                        Text(
-                            text = if (uiState.isFrontCamera) "Dùng Cam sau" else "Dùng Cam trước",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Mô phỏng kiểm thử UI độc lập
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SurfaceContainerLow)
-                    .padding(14.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "Mô phỏng kiểm thử giao diện (Testing Sandbox)",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = PrimaryBlue
-                    )
-                    Text(
-                        text = "Kích hoạt nhanh trạng thái hiển thị UI:",
-                        fontSize = 12.sp,
-                        color = OnSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                onEvent(AttendanceUiEvent.OnSimulateSuccess)
-                                onDismiss()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
-                        ) {
-                            Text("Thành công", fontSize = 11.sp, color = OnTertiary, fontWeight = FontWeight.Bold)
-                        }
-
-                        Button(
-                            onClick = {
-                                onEvent(AttendanceUiEvent.OnSimulateFailure)
-                                onDismiss()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
-                        ) {
-                            Text("Thất bại", fontSize = 11.sp, color = OnError, fontWeight = FontWeight.Bold)
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                onEvent(AttendanceUiEvent.OnSimulateIdle)
-                                onDismiss()
-                            },
-                            modifier = Modifier.weight(0.9f),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Quét lại", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
 
             Spacer(modifier = Modifier.height(12.dp))
 

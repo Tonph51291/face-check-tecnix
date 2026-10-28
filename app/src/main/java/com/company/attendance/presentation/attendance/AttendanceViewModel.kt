@@ -135,15 +135,7 @@ class AttendanceViewModel(
                     )
                 }
             }
-            is AttendanceUiEvent.OnSwitchCamera -> {
-                consecutiveAlignedFrames = 0
-                _uiState.update { current ->
-                    current.copy(
-                        isFrontCamera = !current.isFrontCamera,
-                        status = RecognitionStatus.IDLE
-                    )
-                }
-            }
+
             is AttendanceUiEvent.OnDismissResult, is AttendanceUiEvent.OnScanAgain -> {
                 resetToIdle()
             }
@@ -225,16 +217,7 @@ class AttendanceViewModel(
                 resetToIdle()
                 _uiState.update { it.copy(isRealMode = event.isReal) }
             }
-            // Các trigger mô phỏng kiểm thử độc lập
-            is AttendanceUiEvent.OnSimulateSuccess -> {
-                simulateSuccess()
-            }
-            is AttendanceUiEvent.OnSimulateFailure -> {
-                simulateFailure()
-            }
-            is AttendanceUiEvent.OnSimulateIdle -> {
-                resetToIdle()
-            }
+
         }
     }
 
@@ -587,63 +570,6 @@ class AttendanceViewModel(
         }
     }
 
-    private fun simulateSuccess() {
-        autoDismissJob?.cancel()
-        viewModelScope.launch {
-            _uiState.update { current ->
-                current.copy(
-                    status = RecognitionStatus.VERIFYING,
-                    confidenceText = "Đang đối chiếu dữ liệu (Mô phỏng)..."
-                )
-            }
-            delay(600)
-            val nowTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            _uiState.update { current ->
-                current.copy(
-                    status = RecognitionStatus.SUCCESS,
-                    confidenceText = "Đã khớp: 99.4% (Mô phỏng)",
-                    resultData = AttendanceResultData(
-                        employeeName = "Nguyễn Văn An",
-                        employeeCode = "NV008",
-                        department = "Phòng Công nghệ Phần mềm",
-                        checkInTime = nowTime,
-                        matchScore = 99.4f,
-                        attendanceType = "CHECK_IN",
-                        attendanceStatus = "Đúng giờ",
-                        isDemo = true
-                    ),
-                    autoDismissRemainingSeconds = 2,
-                    isWaitingFaceClearance = true
-                )
-            }
-            _uiEffect.emit(AttendanceUiEffect.PlaySuccessSound)
-            startAutoDismissCountdown()
-        }
-    }
-
-    private fun simulateFailure() {
-        autoDismissJob?.cancel()
-        viewModelScope.launch {
-            _uiState.update { current ->
-                current.copy(
-                    status = RecognitionStatus.VERIFYING,
-                    confidenceText = "Đang đối chiếu dữ liệu (Mô phỏng)..."
-                )
-            }
-            delay(600)
-            _uiState.update { current ->
-                current.copy(
-                    status = RecognitionStatus.FAILURE,
-                    confidenceText = "Độ khớp thấp: 24% (Mô phỏng)",
-                    failureReason = "Khuôn mặt chưa khớp hồ sơ TECNIX. Vui lòng căn chỉnh lại góc nhìn hoặc liên hệ quản lý.",
-                    resultData = null,
-                    autoDismissRemainingSeconds = 2
-                )
-            }
-            _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
-            startAutoDismissCountdown()
-        }
-    }
 
     private fun startAutoDismissCountdown(seconds: Int = 2) {
         autoDismissJob?.cancel()

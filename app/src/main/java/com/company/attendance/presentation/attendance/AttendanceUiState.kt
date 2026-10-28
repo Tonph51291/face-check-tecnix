@@ -55,7 +55,7 @@ data class AttendanceUiState(
     val hasCameraPermission: Boolean = false,
     val isCameraInitialized: Boolean = false,
     val cameraErrorMessage: String? = null,
-    val isFrontCamera: Boolean = true,
+    val isFrontCamera: Boolean = false,
 
     // Điều hướng màn hình
     val currentScreen: KioskScreen = KioskScreen.ATTENDANCE,

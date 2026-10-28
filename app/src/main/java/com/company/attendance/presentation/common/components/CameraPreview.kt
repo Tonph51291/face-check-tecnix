@@ -26,7 +26,7 @@ import com.company.attendance.domain.model.FaceDetectionData
 @Composable
 fun CameraPreview(
     modifier: Modifier = Modifier,
-    isFrontCamera: Boolean = true,
+    isFrontCamera: Boolean = false,
     onFaceDetected: (FaceDetectionData?) -> Unit = {},
     onCaptureReady: ((() -> Bitmap?) -> Unit)? = null,
     onInitialized: () -> Unit = {},

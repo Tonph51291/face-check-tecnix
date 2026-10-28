@@ -161,7 +161,7 @@ fun FaceCaptureScreen(
                         cameraContent = {
                             CameraPreview(
                                 modifier = Modifier.fillMaxSize(),
-                                isFrontCamera = true,
+                                isFrontCamera = false,
                                 onFaceDetected = { faceData ->
                                     viewModel.onFaceFrame(faceData)
                                 },

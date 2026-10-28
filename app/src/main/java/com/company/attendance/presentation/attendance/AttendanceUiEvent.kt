@@ -13,8 +13,6 @@ sealed interface AttendanceUiEvent {
     data object OnCameraInitialized : AttendanceUiEvent
     data class OnCameraError(val message: String) : AttendanceUiEvent
     data object OnRetryCamera : AttendanceUiEvent
-    data object OnSwitchCamera : AttendanceUiEvent
-
     // Tương tác kết quả
     data object OnDismissResult : AttendanceUiEvent
     data object OnScanAgain : AttendanceUiEvent
@@ -32,10 +30,4 @@ sealed interface AttendanceUiEvent {
     data class OnRetakeFaceEnrollment(val employeeId: String) : AttendanceUiEvent
     data object OnConsumeRefreshEmployeeList : AttendanceUiEvent
     data class OnToggleRealMode(val isReal: Boolean) : AttendanceUiEvent
-
-
-    // Mô phỏng kiểm thử
-    data object OnSimulateSuccess : AttendanceUiEvent
-    data object OnSimulateFailure : AttendanceUiEvent
-    data object OnSimulateIdle : AttendanceUiEvent
 }
