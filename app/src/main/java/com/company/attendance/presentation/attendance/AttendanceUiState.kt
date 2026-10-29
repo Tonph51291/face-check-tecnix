@@ -40,6 +40,7 @@ data class AttendanceResultData(
  * Các màn hình trong quy trình Kiosk TECNIX chuẩn Stitch
  */
 enum class KioskScreen {
+    SPLASH,             // Màn hình khởi động: Nạp AI On-Device, kết nối camera & kiểm tra hệ thống
     ATTENDANCE,         // Màn hình 1: Quét mặt chấm công
     EMPLOYEE_SEARCH,    // Màn hình 3: Tìm kiếm nhân viên
     EMPLOYEE_DETAIL,    // Chi tiết nhân viên

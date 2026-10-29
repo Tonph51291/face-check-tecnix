@@ -23,12 +23,12 @@ class CameraFaceAnalyzer(
 ) : ImageAnalysis.Analyzer {
 
     // Cấu hình ML Kit Face Detector:
-    // - Bật CLASSIFICATION_MODE_ALL để kiểm tra đặc trưng mắt (loại bỏ nhiễu tường/vật thể vô tri)
-    // - minFaceSize = 0.15f (15%) để bỏ qua các chi tiết nhỏ ở hậu cảnh
+    // - Bật CLASSIFICATION_MODE_ALL để kiểm tra đặc trưng mắt (loại bỏ nhiễu tường/vật thể vô tri, chống chớp mắt)
+    // - minFaceSize = 0.08f (8%) mở rộng khoảng cách bắt mặt linh hoạt từ 0.5m đến 2.0m
     private val options = FaceDetectorOptions.Builder()
         .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
         .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-        .setMinFaceSize(0.15f)
+        .setMinFaceSize(0.08f)
         .enableTracking()
         .build()
 
@@ -66,13 +66,13 @@ class CameraFaceAnalyzer(
                 }
 
                 // Chuyển đổi và lọc bỏ các khuôn mặt giả lập (Ghost/Phantom Face) do nhiễu môi trường:
-                // 1. Kích thước tối thiểu: Chiều rộng và chiều cao >= 80px
+                // 1. Kích thước tối thiểu: Chiều rộng và chiều cao >= 60px (hỗ trợ bắt xa tới 2m)
                 // 2. Tỉ lệ khung hình (Aspect Ratio = w / h): Khuôn mặt người thật luôn nằm trong khoảng 0.60 .. 1.45
                 val trackedFaces = faces.mapNotNull { face ->
                     val box = face.boundingBox
                     val w = box.width()
                     val h = box.height()
-                    if (w < 80 || h < 80) return@mapNotNull null
+                    if (w < 60 || h < 60) return@mapNotNull null
                     val aspectRatio = w.toFloat() / h.toFloat()
                     if (aspectRatio !in 0.60f..1.45f) return@mapNotNull null
 
@@ -98,9 +98,11 @@ class CameraFaceAnalyzer(
                 // Chọn người ưu tiên (Primary Face):
                 // 1. Ưu tiên khuôn mặt có đặc trưng hợp lệ (không phải đồ vật)
                 // 2. Ưu tiên người đang nhìn thẳng (isLookingStraight)
-                // 3. Ưu tiên người có diện tích lớn nhất (đứng gần camera nhất)
+                // 3. Ưu tiên người đang mở mắt (areEyesOpen - chống chụp lúc nhắm mắt)
+                // 4. Ưu tiên người có diện tích lớn nhất (đứng gần camera nhất)
                 val primaryFace = trackedFaces.filter { it.hasValidFaceFeatures }.maxWithOrNull(
                     compareBy<FaceTrackItem> { it.isLookingStraight }
+                        .thenBy { it.areEyesOpen }
                         .thenBy { it.area }
                 ) ?: trackedFaces.first()
 

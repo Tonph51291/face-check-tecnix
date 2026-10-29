@@ -122,7 +122,7 @@ fun CameraPreview(
                             lifecycleOwner,
                             selectorToUse,
                             preview,
-                            imageAnalysis
+                                imageAnalysis
                         )
                         onInitialized()
                     } catch (e: Exception) {

@@ -76,15 +76,15 @@ class FaceQualityChecker {
             )
         }
 
-        // 2. Kiểm tra khoảng cách / kích thước mặt (Hỗ trợ từ 0.5m đến 2m)
+        // 2. Kiểm tra khoảng cách / kích thước mặt (Hỗ trợ từ 0.5m đến 2.2m)
         val distanceText: String
         when {
-            faceCoverageRatio < 0.04f -> {
+            faceCoverageRatio < 0.02f -> {
                 return QualityEvaluation(
                     status = FaceAlignmentStatus.TOO_FAR,
                     message = "Vui lòng bước lại gần camera hơn",
                     isAligned = false,
-                    estimatedDistanceText = "Quá xa (> 2m)"
+                    estimatedDistanceText = "Quá xa (> 2.2m)"
                 )
             }
             faceCoverageRatio > 0.65f -> {
@@ -95,6 +95,9 @@ class FaceQualityChecker {
                     estimatedDistanceText = "Quá gần (< 30cm)"
                 )
             }
+            faceCoverageRatio < 0.06f -> {
+                distanceText = "Khoảng cách: ~1.8m - 2m"
+            }
             faceCoverageRatio < 0.12f -> {
                 distanceText = "Khoảng cách: ~1.2m"
             }
@@ -102,7 +105,7 @@ class FaceQualityChecker {
                 distanceText = "Khoảng cách: ~50cm"
             }
             else -> {
-                distanceText = "Khoảng cách: 70cm (Tốt)"
+                distanceText = "Khoảng cách: ~80cm (Chuẩn)"
             }
         }
 

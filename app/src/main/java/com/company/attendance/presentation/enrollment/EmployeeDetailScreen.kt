@@ -224,13 +224,7 @@ fun EmployeeDetailContent(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // 3. Thẻ Thông tin vị trí & Quy định ca làm việc
-                        ShiftPolicyCard(
-                            shiftName = shift?.name ?: "Ca tiêu chuẩn",
-                            timeRange = shift?.timeRange ?: "08:30 - 17:30",
-                            allowedLateMinutes = shift?.allowedLateMinutes ?: 15,
-                            assignedKiosk = shift?.assignedKiosk ?: "Kiosk Cổng 1"
-                        )
+
 
                         // 4. Lịch sử chấm công gần đây (Chỉ hiển thị khi nhân viên đã có dữ liệu chấm công)
                         if (recentAttendance.isNotEmpty()) {

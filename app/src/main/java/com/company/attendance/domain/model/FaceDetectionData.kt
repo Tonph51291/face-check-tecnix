@@ -49,6 +49,14 @@ data class FaceTrackItem(
             }
             return true
         }
+
+    /** Kiểm tra 2 mắt đang mở (chống chụp lúc chớp mắt để vector đạt độ nét chuẩn) */
+    val areEyesOpen: Boolean
+        get() {
+            val left = leftEyeOpenProbability ?: return true
+            val right = rightEyeOpenProbability ?: return true
+            return left >= 0.40f && right >= 0.40f
+        }
 }
 
 /**

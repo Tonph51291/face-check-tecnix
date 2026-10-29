@@ -18,6 +18,7 @@ import com.company.attendance.presentation.enrollment.EmployeeDetailScreen
 import com.company.attendance.presentation.enrollment.EmployeeSearchScreen
 import com.company.attendance.presentation.enrollment.FaceCaptureScreen
 import com.company.attendance.presentation.enrollment.FaceReviewScreen
+import com.company.attendance.presentation.splash.SplashScreen
 import kotlinx.coroutines.launch
 
 /**
@@ -28,7 +29,7 @@ import kotlinx.coroutines.launch
 fun KioskApp(
     modifier: Modifier = Modifier
 ) {
-    var currentScreen by remember { mutableStateOf(KioskScreen.ATTENDANCE) }
+    var currentScreen by remember { mutableStateOf(KioskScreen.SPLASH) }
     var selectedEmployeeId by remember { mutableStateOf<String?>(null) }
     var selectedEmployee by remember { mutableStateOf<Employee?>(null) }
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -39,6 +40,15 @@ fun KioskApp(
     val employeeRepository = remember { RepositoryModule.employeeRepository }
 
     when (currentScreen) {
+        KioskScreen.SPLASH -> {
+            SplashScreen(
+                onInitializationComplete = {
+                    currentScreen = KioskScreen.ATTENDANCE
+                },
+                modifier = modifier
+            )
+        }
+
         KioskScreen.ATTENDANCE -> {
             AttendanceScreen(
                 onNavigateToEmployeeSearch = {

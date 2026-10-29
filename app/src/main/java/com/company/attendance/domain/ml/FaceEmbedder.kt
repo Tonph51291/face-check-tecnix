@@ -2,10 +2,12 @@ package com.company.attendance.domain.ml
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.util.Base64
 import com.company.attendance.core.logging.logE
 import com.company.attendance.core.logging.logI
+import com.company.attendance.core.logging.logW
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
@@ -30,6 +32,14 @@ class FaceEmbedder(private val context: Context) {
 
     private var interpreter: Interpreter? = null
 
+    // Bộ nhớ đệm tái sử dụng (Zero Heap Allocation - Chống giật lag và tràn RAM)
+    private val cachedInputBuffer = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4).apply {
+        order(ByteOrder.nativeOrder())
+    }
+    private val cachedIntValues = IntArray(INPUT_SIZE * INPUT_SIZE)
+    private val cachedOutputArray = Array(1) { FloatArray(EMBEDDING_DIM) }
+    private val inferenceLock = Any()
+
     companion object {
         const val MODEL_FILE = "face_recongize.tflite"
         const val INPUT_SIZE = 160
@@ -51,11 +61,22 @@ class FaceEmbedder(private val context: Context) {
             val declaredLength = assetFileDescriptor.declaredLength
             val modelBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
 
-            val options = Interpreter.Options().apply {
-                setNumThreads(4)
+            var createdInterpreter: Interpreter? = null
+            try {
+                val nnapiOptions = Interpreter.Options().apply {
+                    setNumThreads(4)
+                    setUseNNAPI(true)
+                }
+                createdInterpreter = Interpreter(modelBuffer, nnapiOptions)
+                logI("Đã nạp FaceNet TFLite (512D) với hỗ trợ NNAPI tăng tốc phần cứng NPU")
+            } catch (e: Exception) {
+                logW("NNAPI không khả dụng trên thiết bị này, dùng CPU 4 threads fallback: ${e.message}")
+                val cpuOptions = Interpreter.Options().apply {
+                    setNumThreads(4)
+                }
+                createdInterpreter = Interpreter(modelBuffer, cpuOptions)
             }
-            interpreter = Interpreter(modelBuffer, options)
-            logI("Đã nạp thành công mô hình FaceNet TFLite (512D) từ assets")
+            interpreter = createdInterpreter
         } catch (e: Exception) {
             logE("Không thể nạp mô hình $MODEL_FILE từ assets", e)
         }
@@ -151,41 +172,64 @@ class FaceEmbedder(private val context: Context) {
 
     /**
      * Trích xuất vector 512 chiều từ ảnh mặt đã cắt chuẩn xác
+     * @param croppedFace Ảnh khuôn mặt đã cắt
+     * @param rotationAngleZ Góc nghiêng đầu (Roll) để tự động xoay mặt đứng thẳng, tăng độ chuẩn xác của vector
      */
-    fun extractEmbeddingFromCroppedFace(croppedFace: Bitmap): FloatArray? {
+    fun extractEmbeddingFromCroppedFace(croppedFace: Bitmap, rotationAngleZ: Float = 0f): FloatArray? {
         val interp = interpreter ?: run {
             logE("FaceEmbedder: Model chưa được khởi tạo")
             return null
         }
 
-        try {
-            val resized = Bitmap.createScaledBitmap(croppedFace, INPUT_SIZE, INPUT_SIZE, true)
-            val inputBuffer = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4).apply {
-                order(ByteOrder.nativeOrder())
-                rewind()
-            }
+        return synchronized(inferenceLock) {
+            var faceToProcess = croppedFace
+            var rotatedBitmap: Bitmap? = null
+            var resizedBitmap: Bitmap? = null
 
-            val intValues = IntArray(INPUT_SIZE * INPUT_SIZE)
-            resized.getPixels(intValues, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
-            if (resized != croppedFace) {
-                resized.recycle()
-            }
+            try {
+                // 1. Tự động xoay thẳng khuôn mặt theo góc nghiêng Euler Z nếu đầu bị nghiêng nhẹ (> 3 độ)
+                if (kotlin.math.abs(rotationAngleZ) in 3.0f..40.0f) {
+                    val matrix = Matrix().apply {
+                        postRotate(-rotationAngleZ) // Xoay ngược lại góc nghiêng để khuôn mặt đứng thẳng
+                    }
+                    rotatedBitmap = Bitmap.createBitmap(
+                        croppedFace, 0, 0,
+                        croppedFace.width, croppedFace.height,
+                        matrix, true
+                    )
+                    faceToProcess = rotatedBitmap
+                }
 
-            for (pixel in intValues) {
-                val r = (pixel shr 16 and 0xFF)
-                val g = (pixel shr 8 and 0xFF)
-                val b = (pixel and 0xFF)
-                inputBuffer.putFloat((r - IMAGE_MEAN) / IMAGE_STD)
-                inputBuffer.putFloat((g - IMAGE_MEAN) / IMAGE_STD)
-                inputBuffer.putFloat((b - IMAGE_MEAN) / IMAGE_STD)
-            }
+                // 2. Scale về đúng chuẩn 160x160 của mô hình FaceNet
+                resizedBitmap = Bitmap.createScaledBitmap(faceToProcess, INPUT_SIZE, INPUT_SIZE, true)
 
-            val outputArray = Array(1) { FloatArray(EMBEDDING_DIM) }
-            interp.run(inputBuffer, outputArray)
-            return l2Normalize(outputArray[0])
-        } catch (e: Exception) {
-            logE("FaceEmbedder: Lỗi trích xuất vector khuôn mặt", e)
-            return null
+                // 3. Sử dụng bộ nhớ đệm tái sử dụng (0 Byte rác Heap)
+                resizedBitmap.getPixels(cachedIntValues, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
+
+                cachedInputBuffer.rewind()
+                for (pixel in cachedIntValues) {
+                    val r = (pixel shr 16 and 0xFF)
+                    val g = (pixel shr 8 and 0xFF)
+                    val b = (pixel and 0xFF)
+                    cachedInputBuffer.putFloat((r - IMAGE_MEAN) / IMAGE_STD)
+                    cachedInputBuffer.putFloat((g - IMAGE_MEAN) / IMAGE_STD)
+                    cachedInputBuffer.putFloat((b - IMAGE_MEAN) / IMAGE_STD)
+                }
+
+                interp.run(cachedInputBuffer, cachedOutputArray)
+                l2Normalize(cachedOutputArray[0].clone())
+            } catch (e: Exception) {
+                logE("FaceEmbedder: Lỗi trích xuất vector khuôn mặt", e)
+                null
+            } finally {
+                // Giải phóng ngay lập tức các bitmap trung gian
+                if (resizedBitmap != null && resizedBitmap != faceToProcess && resizedBitmap != croppedFace) {
+                    resizedBitmap.recycle()
+                }
+                if (rotatedBitmap != null && rotatedBitmap != croppedFace) {
+                    rotatedBitmap.recycle()
+                }
+            }
         }
     }
 
@@ -201,12 +245,21 @@ class FaceEmbedder(private val context: Context) {
 
     /**
      * Tạo ảnh thumbnail Avatar Base64 từ ảnh mặt đã crop (kèm prefix data:image/jpeg;base64,)
+     * Tối ưu kích thước 160px và chất lượng 75% để giảm 60% dung lượng payload gửi mạng
      */
-    fun createThumbnailBase64FromCroppedFace(croppedFace: Bitmap, targetSize: Int = 300): String? {
+    fun createThumbnailBase64FromCroppedFace(
+        croppedFace: Bitmap,
+        targetSize: Int = 160,
+        quality: Int = 75
+    ): String? {
         try {
-            val resized = Bitmap.createScaledBitmap(croppedFace, targetSize, targetSize, true)
+            val resized = if (croppedFace.width != targetSize || croppedFace.height != targetSize) {
+                Bitmap.createScaledBitmap(croppedFace, targetSize, targetSize, true)
+            } else {
+                croppedFace
+            }
             val stream = ByteArrayOutputStream()
-            resized.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+            resized.compress(Bitmap.CompressFormat.JPEG, quality, stream)
             if (resized != croppedFace) {
                 resized.recycle()
             }

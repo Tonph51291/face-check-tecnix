@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -78,33 +80,37 @@ fun KioskHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF2563EB)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Face,
-                    contentDescription = "Logo TECNIX",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+            Image(
+                painter = painterResource(id = com.example.facechecktecnix.R.drawable.logo_tecnix),
+                contentDescription = "Logo TECNIX",
+                modifier = Modifier.size(38.dp)
+            )
 
             Column(
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = "TECNIX",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.3).sp,
-                        fontSize = 18.sp
-                    ),
-                    color = Color(0xFF1E3A8A)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TEC",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp,
+                            fontSize = 18.sp
+                        ),
+                        color = Color(0xFF0082C8)
+                    )
+                    Text(
+                        text = "NIX",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp,
+                            fontSize = 18.sp
+                        ),
+                        color = Color(0xFFF26522)
+                    )
+                }
                 Text(
                     text = "Kiosk Chấm công AI",
                     style = MaterialTheme.typography.labelSmall.copy(

@@ -42,7 +42,7 @@ class AttendanceViewModel @JvmOverloads constructor(
     private val submitAttendanceUseCase: SubmitAttendanceUseCase = SubmitAttendanceUseCase(RepositoryModule.attendanceRepository)
 ) : AndroidViewModel(application) {
 
-    private val faceEmbedder = FaceEmbedder(application.applicationContext)
+    private val faceEmbedder = com.company.attendance.di.MlModule.getFaceEmbedder(application.applicationContext)
 
     private val _uiState = MutableStateFlow(AttendanceUiState())
     val uiState: StateFlow<AttendanceUiState> = _uiState.asStateFlow()
@@ -75,7 +75,7 @@ class AttendanceViewModel @JvmOverloads constructor(
     private val completedTrackingIds = mutableMapOf<Int, Long>()
     private val stableFramesMap = mutableMapOf<Int, Int>()
     private val faceCooldownDurationMs = 10000L
-    private val requiredStableFrames = 5 // ~160ms - 200ms giữ ổn định để chụp ảnh sắc nét, chống nhòe chuyển động
+    private val requiredStableFrames = 4 // ~130ms giữ ổn định để chụp ảnh siêu tốc và sắc nét
 
     // Best-Shot Selection: Theo dõi độ dịch chuyển tâm mặt (motion displacement)
     // Nếu người dùng đang bước đi quá nhanh (displacement > 18px), reset đếm ổn định để tránh chụp ảnh mờ
@@ -229,8 +229,13 @@ class AttendanceViewModel @JvmOverloads constructor(
                 logI("Phát hiện người mới bước vào camera (trackingId: ${faceData.trackingId} != $lastCheckedTrackingId) -> Đổi lượt quét ngay")
                 autoDismissJob?.cancel()
                 _uiState.update {
+                    val oldBitmap = it.capturedBitmap
+                    if (oldBitmap != null && !oldBitmap.isRecycled) {
+                        try { oldBitmap.recycle() } catch (_: Exception) {}
+                    }
                     it.copy(
                         status = RecognitionStatus.IDLE,
+                        capturedBitmap = null,
                         resultData = null,
                         duplicateMessage = null,
                         isWaitingFaceClearance = false,
@@ -385,12 +390,14 @@ class AttendanceViewModel @JvmOverloads constructor(
         // Điều kiện chụp ảnh sắc nét (Best-Shot):
         // 1. Nhìn thẳng và có đặc trưng khuôn mặt hợp lệ (chống giả lập / ma)
         // 2. Không di chuyển nhanh khi chụp (độ dịch chuyển tâm <= 12px giữa các frame)
-        // 3. Đứng đủ gần camera (chiều rộng & cao khuôn mặt >= 110px)
+        // 3. Đứng trong khoảng cách hợp lý (chiều rộng & cao khuôn mặt >= 70px, hỗ trợ bắt xa tới 2m)
+        // 4. Mắt đang mở (chống chụp lúc chớp mắt)
         val isStationary = displacement <= 12f
-        val isSufficientSize = primaryBox.width() >= 110 && primaryBox.height() >= 110
+        val isSufficientSize = primaryBox.width() >= 70 && primaryBox.height() >= 70
+        val isEyesOpen = primaryCandidate.areEyesOpen
         val isLookingStraight = primaryCandidate.isLookingStraight && primaryCandidate.hasValidFaceFeatures
 
-        if (isLookingStraight && isStationary && isSufficientSize) {
+        if (isLookingStraight && isEyesOpen && isStationary && isSufficientSize) {
             val currentStable = (stableFramesMap[candidateTrackId] ?: 0) + 1
             stableFramesMap[candidateTrackId] = currentStable
             val progress = (currentStable.toFloat() / requiredStableFrames).coerceIn(0f, 1f)
@@ -423,14 +430,22 @@ class AttendanceViewModel @JvmOverloads constructor(
                 triggerVerification(faceData, primaryCandidate)
             }
         } else {
-            // Người đó đang quay đầu, di chuyển nhanh hoặc quá xa -> reset đếm ổn định để tránh chụp mờ
+            // Người đó đang quay đầu, nhắm mắt, di chuyển nhanh hoặc quá xa -> reset đếm ổn định để tránh chụp mờ
             stableFramesMap[candidateTrackId] = 0
             val guidance = when {
                 !isSufficientSize -> "Vui lòng tiến lại gần camera hơn"
                 !isLookingStraight -> "Vui lòng nhìn thẳng vào camera"
+                !isEyesOpen -> "Vui lòng mở mắt khi quét"
                 else -> "Giữ yên khuôn mặt để chụp nét..."
             }
             _uiState.update { current ->
+                if (current.status == RecognitionStatus.ALIGNING &&
+                    current.activeGuidance == guidance &&
+                    current.stabilityProgress == 0f &&
+                    current.detectedFaces.size == faces.size
+                ) {
+                    return@update current
+                }
                 current.copy(
                     status = RecognitionStatus.ALIGNING,
                     faceData = faceData,
@@ -461,7 +476,7 @@ class AttendanceViewModel @JvmOverloads constructor(
                 current.copy(
                     status = RecognitionStatus.VERIFYING,
                     faceData = faceData,
-                    activeGuidance = "Đang nhận diện khuôn mặt qua AI Server...",
+                    activeGuidance = "Đang nhận diện khuôn mặt qua",
                     confidenceText = "Đang đối chiếu...",
                     stabilityProgress = 1f
                 )
@@ -478,31 +493,37 @@ class AttendanceViewModel @JvmOverloads constructor(
                 val bitmap = bitmapProvider?.invoke()
 
                 if (bitmap != null) {
-                    // 1. Xác thực khuôn mặt thực tế trên Bitmap chụp (ngăn chặn triệt để chụp tường trống / phantom face)
-                    val exactBox = faceEmbedder.detectFaceBoundingBox(bitmap)
-                    if (exactBox == null) {
-                        logE("[ATTENDANCE] Bitmap chụp không phát hiện khuôn mặt thực sự -> Bỏ qua tránh phantom check-in")
-                        _uiState.update { current ->
-                            current.copy(
-                                status = RecognitionStatus.IDLE,
-                                activeGuidance = "Vui lòng nhìn thẳng vào camera",
-                                confidenceText = "Đang tìm khuôn mặt...",
-                                stabilityProgress = 0f
-                            )
-                        }
-                        return@launch
-                    }
+                    val sensorFaceBox = targetFace?.boundingBox ?: faceData.primaryFace?.boundingBox ?: faceData.boundingBox
+                    val eulerAngleZ = targetFace?.headEulerAngleZ ?: faceData.headEulerAngleZ
 
-                    // [DEBUG_CAPTURE_TEST] Giữ lại bitmap để hiển thị trực tiếp lên UI test độ nét
-                    _uiState.update { it.copy(capturedBitmap = bitmap) }
+                    // 1. Ánh xạ trực tiếp tọa độ khuôn mặt sang Bitmap (0ms, không cần chạy lại ML Kit lần 2)
+                    val exactBox = faceEmbedder.mapBoundingBoxToBitmap(
+                        sensorBox = sensorFaceBox,
+                        sensorWidth = faceData.imageWidth,
+                        sensorHeight = faceData.imageHeight,
+                        bitmapWidth = bitmap.width,
+                        bitmapHeight = bitmap.height,
+                        isFrontCamera = _uiState.value.isFrontCamera
+                    )
 
+                    // 2. Cắt khuôn mặt với lề viền an toàn 22%
                     val croppedFace = faceEmbedder.cropFace(bitmap, exactBox, marginRatio = 0.22f) ?: bitmap
 
-                    // 2. Trích xuất vector 512D On-Device bằng TFLite
-                    val faceVector = faceEmbedder.extractEmbeddingFromCroppedFace(croppedFace)
+                    // 3. GIẢI PHÓNG NGAY LẬP TỨC Bitmap full màn hình 8MB để tiết kiệm RAM triệt để
+                    if (croppedFace != bitmap) {
+                        bitmap.recycle()
+                    }
+
+                    // [DEBUG_CAPTURE_TEST] Giữ lại croppedFace gọn nhẹ (~50KB) để hiển thị lên UI kết quả thay vì giữ cả ảnh 8MB
+                    _uiState.update { it.copy(capturedBitmap = croppedFace) }
+
+                    // 4. Trích xuất vector 512D On-Device bằng TFLite (kèm xoay thẳng mặt theo góc nghiêng Euler Z)
+                    val faceVector = faceEmbedder.extractEmbeddingFromCroppedFace(
+                        croppedFace = croppedFace,
+                        rotationAngleZ = eulerAngleZ
+                    )
                     if (faceVector == null) {
                         logE("[ATTENDANCE] Không thể trích xuất vector khuôn mặt On-Device")
-                        if (croppedFace != bitmap) croppedFace.recycle()
                         _uiState.update { current ->
                             current.copy(
                                 status = RecognitionStatus.FAILURE,
@@ -516,11 +537,8 @@ class AttendanceViewModel @JvmOverloads constructor(
                         return@launch
                     }
 
-                    // 3. Tạo ảnh thumbnail đại diện nhẹ để lưu vết log
-                    val thumbnailBase64 = faceEmbedder.createThumbnailBase64FromCroppedFace(croppedFace, targetSize = 240)
-                    if (croppedFace != bitmap) {
-                        croppedFace.recycle()
-                    }
+                    // 5. Tạo ảnh thumbnail đại diện nhẹ (160px @ 75%) để giảm 60% payload upload mạng
+                    val thumbnailBase64 = faceEmbedder.createThumbnailBase64FromCroppedFace(croppedFace, targetSize = 160, quality = 75)
 
                     logI("[FACE_CHECKIN] Gửi vector 512D On-Device (dim=${faceVector.size}) lên FaceCheck AI Backend...")
                     val result = attendanceRepository.checkIn(
@@ -690,9 +708,14 @@ class AttendanceViewModel @JvmOverloads constructor(
         lastFaceCenterMap.clear()
         livenessChecker.reset()
         _uiState.update { current ->
+            val oldBitmap = current.capturedBitmap
+            if (oldBitmap != null && !oldBitmap.isRecycled) {
+                try { oldBitmap.recycle() } catch (_: Exception) {}
+            }
             current.copy(
                 status = RecognitionStatus.IDLE,
                 faceData = null,
+                capturedBitmap = null,
                 alignmentStatus = FaceAlignmentStatus.NO_FACE,
                 activeGuidance = if (current.isWaitingFaceClearance) "Vui lòng nhường vị trí cho người tiếp theo." else "Vui lòng nhìn thẳng vào camera",
                 confidenceText = if (current.isWaitingFaceClearance) "Vui lòng nhường vị trí" else "Đang tìm khuôn mặt...",
