@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
@@ -27,6 +28,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -54,7 +57,6 @@ import com.company.attendance.presentation.common.theme.SurfaceContainerLowest
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KioskSettingsBottomSheet(
-    uiState: AttendanceUiState,
     onEvent: (AttendanceUiEvent) -> Unit,
     onDismiss: () -> Unit,
     onNavigateToEmployeeList: (() -> Unit)? = null
@@ -131,43 +133,6 @@ fun KioskSettingsBottomSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Thẻ trạng thái Model AI Offline & Chi phí 0đ
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFE8F5EE))
-                    .padding(14.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Verified,
-                        contentDescription = null,
-                        tint = SuccessGreen,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Column {
-                        Text(
-                            text = "Mô hình On-Device: Google ML Kit Face Detection",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF005230)
-                        )
-                        Text(
-                            text = "• Chi phí: 100% Miễn phí (Apache 2.0 License)\n• Tải đóng gói sẵn (Bundled APK), chạy Offline không cần Internet\n• Phân tích frame CameraX tự động, không gửi ảnh lên Cloud",
-                            fontSize = 11.sp,
-                            color = Color(0xFF003820),
-                            lineHeight = 16.sp,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
 
             // Box Danh sách nhân viên (Chuyển sang Màn hình 3: Tìm kiếm nhân viên chuẩn Stitch)
             Box(
@@ -217,19 +182,6 @@ fun KioskSettingsBottomSheet(
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF1E3A8A)
                                 )
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(999.dp))
-                                        .background(PrimaryBlue.copy(alpha = 0.12f))
-                                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Màn hình 3",
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = PrimaryBlue
-                                    )
-                                }
                             }
                             Text(
                                 text = "Tra cứu, đối soát hồ sơ & đăng ký mẫu khuôn mặt mới",
@@ -262,32 +214,7 @@ fun KioskSettingsBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Cảnh báo minh bạch
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFFFEF7EC))
-                    .padding(12.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = Color(0xFFB7791F),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "Lưu ý bảo mật: Đã kích hoạt bộ lọc căn chỉnh và kiểm tra tính sống cơ bản (mắt, góc đầu). Mô hình nhận diện danh tính (trích xuất vector đặc trưng) và chống giả mạo chuyên sâu cần nạp model weights vào assets/models trước khi vào vận hành thực tế.",
-                        fontSize = 11.sp,
-                        color = Color(0xFF6B4500),
-                        lineHeight = 16.sp
-                    )
-                }
-            }
+
         }
     }
 }

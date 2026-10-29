@@ -55,7 +55,7 @@ data class AttendanceUiState(
     val hasCameraPermission: Boolean = false,
     val isCameraInitialized: Boolean = false,
     val cameraErrorMessage: String? = null,
-    val isFrontCamera: Boolean = false,
+    val isFrontCamera: Boolean = false, // Mặc định mở Camera Sau (RGB Màu chuẩn) cho tablet Kiosk rk3568
 
     // Điều hướng màn hình
     val currentScreen: KioskScreen = KioskScreen.ATTENDANCE,
@@ -73,6 +73,10 @@ data class AttendanceUiState(
 
     // Dữ liệu phát hiện khuôn mặt thời gian thực (ML Kit On-Device)
     val faceData: FaceDetectionData? = null,
+    val detectedFaces: List<android.graphics.Rect> = emptyList(),
+    val primaryFaceBox: android.graphics.Rect? = null,
+    val frameWidth: Int = 0,
+    val frameHeight: Int = 0,
     val alignmentStatus: FaceAlignmentStatus = FaceAlignmentStatus.NO_FACE,
     val activeGuidance: String = "Vui lòng nhìn thẳng vào camera",
     val confidenceText: String = "Đang tìm khuôn mặt...",

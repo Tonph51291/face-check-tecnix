@@ -9,6 +9,4 @@ import androidx.compose.runtime.Immutable
 @Immutable
 data class EnrollmentUiState(
     val searchQuery: String = "",
-    val selectedDepartment: String = "Tất cả",
-    val departments: List<String> = listOf("Tất cả", "Kỹ thuật", "Kinh doanh", "Nhân sự", "Kế toán", "Vận hành")
 )

@@ -45,18 +45,18 @@ import com.company.attendance.domain.model.Employee
 @Composable
 fun BiometricStatusSpotlightCard(
     employee: Employee,
-    onStartFaceCapture: () -> Unit,
+    onStartFaceCapture: (Employee) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isEnrolled = employee.isFaceEnrolled || employee.hasFaceSample
     if (isEnrolled) {
         EnrolledBiometricCard(
-            onRecapture = onStartFaceCapture,
+            onRecapture = { onStartFaceCapture(employee) },
             modifier = modifier
         )
     } else {
         NotEnrolledBiometricCard(
-            onStartEnroll = onStartFaceCapture,
+            onStartEnroll = { onStartFaceCapture(employee) },
             modifier = modifier
         )
     }

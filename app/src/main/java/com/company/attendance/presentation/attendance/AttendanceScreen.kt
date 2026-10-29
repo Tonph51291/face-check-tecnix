@@ -26,9 +26,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import android.graphics.Rect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,14 +46,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.company.attendance.presentation.attendance.components.AttendanceResultDock
 import com.company.attendance.presentation.attendance.components.DigitalClockBar
-import com.company.attendance.presentation.attendance.components.FaceGuideOverlay
 import com.company.attendance.presentation.attendance.components.KioskHeader
 import com.company.attendance.presentation.attendance.components.KioskSettingsBottomSheet
 import com.company.attendance.presentation.common.components.CameraPreview
-import com.company.attendance.presentation.common.components.DuplicateStatusBanner
-import com.company.attendance.presentation.common.components.FailureStatusBanner
-import com.company.attendance.presentation.common.components.SuccessStatusBanner
+import com.company.attendance.presentation.common.components.FaceDetectionOverlay
 import com.company.attendance.presentation.common.permission.CameraPermissionHandler
 import com.company.attendance.presentation.common.permission.rememberCameraPermissionLauncher
 import com.company.attendance.presentation.common.theme.ErrorRed
@@ -94,15 +97,6 @@ fun AttendanceScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    val vignetteBrush = androidx.compose.runtime.remember {
-        Brush.verticalGradient(
-            colors = listOf(
-                Color.Black.copy(alpha = 0.05f),
-                Color.Transparent,
-                Color.Black.copy(alpha = 0.15f)
-            )
-        )
-    }
 
     Box(
         modifier = modifier
@@ -146,7 +140,7 @@ fun AttendanceScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Khu vực Camera chính (Camera Viewfinder Box chuẩn Stitch)
+            // Khu vực Camera chính (Camera Viewfinder Box)
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -170,11 +164,21 @@ fun AttendanceScreen(
                     }
 
                     else -> {
-                        // CameraX Preview kèm phân tích frame bằng ML Kit tự động
+                        var fastDetectedFaces by remember { mutableStateOf<List<Rect>>(emptyList()) }
+                        var fastFrameWidth by remember { mutableIntStateOf(0) }
+                        var fastFrameHeight by remember { mutableIntStateOf(0) }
+                        var fastPrimaryBox by remember { mutableStateOf<Rect?>(null) }
+
+                        // CameraX Preview kèm phân tích frame bằng ML Kit tự động (High-speed 60 FPS)
                         CameraPreview(
                             modifier = Modifier.fillMaxSize(),
                             isFrontCamera = uiState.isFrontCamera,
                             onFaceDetected = { faceData ->
+                                // Cập nhật ngay lập tức lên UI local state để khung ngắm bám sát 100% thời gian thực không độ trễ
+                                fastDetectedFaces = faceData?.allFaces ?: emptyList()
+                                fastFrameWidth = faceData?.imageWidth ?: 0
+                                fastFrameHeight = faceData?.imageHeight ?: 0
+                                fastPrimaryBox = faceData?.boundingBox
                                 viewModel.onEvent(AttendanceUiEvent.OnFaceFrameAnalyzed(faceData))
                             },
                             onCaptureReady = { provider ->
@@ -188,72 +192,30 @@ fun AttendanceScreen(
                             }
                         )
 
-                        // Lớp phủ Vignette Gradient công nghệ cao chuẩn Stitch
+                        // Lớp phủ vẽ góc ngắm khuôn mặt thời gian thực (bám sát khuôn mặt không độ trễ)
+                        FaceDetectionOverlay(
+                            faces = fastDetectedFaces,
+                            imageWidth = fastFrameWidth,
+                            imageHeight = fastFrameHeight,
+                            primaryFaceBox = fastPrimaryBox,
+                            isFrontCamera = uiState.isFrontCamera,
+                            isMultipleFaces = fastDetectedFaces.size > 1
+                        )
+
+                        // Thẻ thông báo kết quả & trạng thái gắn đáy không che camera (Non-blocking Bottom Dock)
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(vignetteBrush)
-                        )
-
-                        // Lớp phủ khung oval và trạng thái phát hiện khuôn mặt
-                        FaceGuideOverlay(
-                            status = uiState.status,
-                            confidenceText = uiState.confidenceText,
-                            estimatedDistance = uiState.estimatedDistanceText,
-                            guidanceMessage = uiState.activeGuidance,
-                            stabilityProgress = uiState.stabilityProgress
-                        )
-
-                        // Dialog kết quả Thành công / Trùng lặp / Thất bại (Floating Modal chuẩn Stitch với nền mờ)
-                        val isShowingResult = (uiState.status == RecognitionStatus.SUCCESS && uiState.resultData != null) ||
-                                uiState.status == RecognitionStatus.DUPLICATE ||
-                                uiState.status == RecognitionStatus.FAILURE
-
-                        if (isShowingResult) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.45f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (uiState.status == RecognitionStatus.SUCCESS && uiState.resultData != null) {
-                                    SuccessStatusBanner(
-                                        data = uiState.resultData!!,
-                                        remainingSeconds = uiState.autoDismissRemainingSeconds,
-                                        onDismiss = {
-                                            viewModel.onEvent(AttendanceUiEvent.OnDismissResult)
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth(0.92f)
-                                            .padding(horizontal = 16.dp)
-                                    )
-                                } else if (uiState.status == RecognitionStatus.DUPLICATE) {
-                                    DuplicateStatusBanner(
-                                        message = uiState.duplicateMessage ?: "Bạn vừa hoàn tất chấm công. Vui lòng thử lại sau thời gian quy định.",
-                                        remainingSeconds = uiState.autoDismissRemainingSeconds,
-                                        onDismiss = {
-                                            viewModel.onEvent(AttendanceUiEvent.OnDismissResult)
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth(0.92f)
-                                            .padding(horizontal = 16.dp)
-                                    )
-                                } else if (uiState.status == RecognitionStatus.FAILURE) {
-                                    FailureStatusBanner(
-                                        reason = uiState.failureReason,
-                                        remainingSeconds = uiState.autoDismissRemainingSeconds,
-                                        onRetry = {
-                                            viewModel.onEvent(AttendanceUiEvent.OnScanAgain)
-                                        },
-                                        onDismiss = {
-                                            viewModel.onEvent(AttendanceUiEvent.OnDismissResult)
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth(0.92f)
-                                            .padding(horizontal = 16.dp)
-                                    )
-                                }
-                            }
+                                .padding(14.dp),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            AttendanceResultDock(
+                                status = uiState.status,
+                                resultData = uiState.resultData,
+                                duplicateMessage = uiState.duplicateMessage,
+                                failureReason = uiState.failureReason,
+                                capturedBitmap = uiState.capturedBitmap
+                            )
                         }
                     }
                 }
@@ -263,7 +225,6 @@ fun AttendanceScreen(
 
     if (uiState.isSettingsDialogVisible) {
         KioskSettingsBottomSheet(
-            uiState = uiState,
             onEvent = viewModel::onEvent,
             onDismiss = {
                 viewModel.onEvent(AttendanceUiEvent.OnToggleSettingsDialog(false))

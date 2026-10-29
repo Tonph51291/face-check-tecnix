@@ -212,24 +212,32 @@ fun FaceGuideOverlay(
                     }
                 }
 
-                // 2. CENTER AI OVAL GUIDE: Trong suốt hoàn toàn để người dùng nhìn rõ mặt mình
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.70f)
-                        .aspectRatio(0.82f)
-                        .clip(RoundedCornerShape(50))
-                        .drawBehind {
-                            drawOval(
-                                color = ovalColor,
-                                style = Stroke(
-                                    width = 3.dp.toPx(),
-                                    pathEffect = if (isStableOrVerifying) null else PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                // 2. CENTER AI OVAL GUIDE: Trong suốt hoàn toàn, chỉ hiển thị khi cần căn chỉnh
+                if (status != RecognitionStatus.IDLE && status != RecognitionStatus.FACE_DETECTED) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.70f)
+                            .aspectRatio(0.82f)
+                            .clip(RoundedCornerShape(50))
+                            .drawBehind {
+                                drawOval(
+                                    color = ovalColor,
+                                    style = Stroke(
+                                        width = 3.dp.toPx(),
+                                        pathEffect = if (isStableOrVerifying) null else PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                                    )
                                 )
-                            )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Không có bất kỳ icon nào che giữa mặt!
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Không có bất kỳ icon nào che giữa mặt!
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.70f)
+                            .aspectRatio(0.82f)
+                    )
                 }
 
                 // 3. BOTTOM HUD PROGRESS & SECURITY METER: Hiển thị tiến trình nhận diện thật sự

@@ -89,6 +89,10 @@ dependencies {
     // ML Kit Face Detection (Bundled On-Device, Offline, 100% Free Apache 2.0)
     implementation(libs.mlkit.face.detection)
 
+    // TensorFlow Lite (FaceNet 512D)
+    implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.support)
+
     // Networking (Retrofit, OkHttp, Gson)
     implementation(libs.retrofit.core)
     implementation(libs.retrofit.converter.gson)

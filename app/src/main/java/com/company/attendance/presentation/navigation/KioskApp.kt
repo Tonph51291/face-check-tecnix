@@ -42,6 +42,10 @@ fun KioskApp(
         KioskScreen.ATTENDANCE -> {
             AttendanceScreen(
                 onNavigateToEmployeeSearch = {
+                    selectedEmployeeId = null
+                    selectedEmployee = null
+                    capturedBitmap = null
+                    faceQualityMetrics = null
                     currentScreen = KioskScreen.EMPLOYEE_SEARCH
                 },
                 modifier = modifier
@@ -51,17 +55,18 @@ fun KioskApp(
         KioskScreen.EMPLOYEE_SEARCH -> {
             EmployeeSearchScreen(
                 onNavigateBack = {
+                    selectedEmployeeId = null
+                    selectedEmployee = null
+                    capturedBitmap = null
+                    faceQualityMetrics = null
                     currentScreen = KioskScreen.ATTENDANCE
                 },
-                onEmployeeSelected = { employeeId ->
-                    selectedEmployeeId = employeeId
+                onEmployeeSelected = { employee: Employee ->
+                    selectedEmployee = employee
+                    selectedEmployeeId = employee.id.ifBlank { employee.code }
+                    capturedBitmap = null
+                    faceQualityMetrics = null
                     currentScreen = KioskScreen.EMPLOYEE_DETAIL
-                    coroutineScope.launch {
-                        val result = employeeRepository.getEmployeeById(employeeId)
-                        result.getOrNull()?.let { emp ->
-                            selectedEmployee = emp
-                        }
-                    }
                 },
                 shouldRefresh = shouldRefreshEmployeeList,
                 onRefreshConsumed = {
@@ -75,69 +80,98 @@ fun KioskApp(
             val activeEmployee = selectedEmployee ?: defaultFallbackEmployee
             val empId = selectedEmployeeId ?: activeEmployee.id.ifBlank { activeEmployee.code }
 
-            EmployeeDetailScreen(
-                employeeId = empId,
-                capturedBitmap = capturedBitmap,
-                forceRefresh = shouldRefreshEmployeeList,
-                onNavigateBack = {
-                    currentScreen = KioskScreen.EMPLOYEE_SEARCH
-                },
-                onStartFaceCapture = {
-                    currentScreen = KioskScreen.FACE_CAPTURE
-                },
-                modifier = modifier
-            )
+            androidx.compose.runtime.key(empId) {
+                EmployeeDetailScreen(
+                    employeeId = empId,
+                    capturedBitmap = capturedBitmap,
+                    forceRefresh = shouldRefreshEmployeeList,
+                    onNavigateBack = {
+                        selectedEmployeeId = null
+                        selectedEmployee = null
+                        capturedBitmap = null
+                        faceQualityMetrics = null
+                        currentScreen = KioskScreen.EMPLOYEE_SEARCH
+                    },
+                    onStartFaceCapture = { targetEmp: Employee ->
+                        selectedEmployee = targetEmp
+                        selectedEmployeeId = targetEmp.id.ifBlank { targetEmp.code }
+                        capturedBitmap = null
+                        faceQualityMetrics = null
+                        currentScreen = KioskScreen.FACE_CAPTURE
+                    },
+                    modifier = modifier
+                )
+            }
         }
 
         KioskScreen.FACE_CAPTURE -> {
             val activeEmployee = selectedEmployee ?: defaultFallbackEmployee
-            FaceCaptureScreen(
-                employee = activeEmployee,
-                onNavigateBack = {
-                    currentScreen = KioskScreen.EMPLOYEE_DETAIL
-                },
-                onCaptureFace = { bitmap, metrics ->
-                    capturedBitmap = bitmap
-                    faceQualityMetrics = metrics
-                    currentScreen = KioskScreen.FACE_REVIEW
-                },
-                modifier = modifier
-            )
+            val empId = selectedEmployeeId ?: activeEmployee.id.ifBlank { activeEmployee.code }
+
+            androidx.compose.runtime.key(empId) {
+                FaceCaptureScreen(
+                    employee = activeEmployee,
+                    onNavigateBack = {
+                        capturedBitmap = null
+                        faceQualityMetrics = null
+                        currentScreen = KioskScreen.EMPLOYEE_DETAIL
+                    },
+                    onCaptureFace = { bitmap, metrics, avatarUrl ->
+                        capturedBitmap = bitmap
+                        faceQualityMetrics = metrics
+                        if (!avatarUrl.isNullOrBlank()) {
+                            selectedEmployee = activeEmployee.copy(
+                                avatarUrl = avatarUrl,
+                                isFaceEnrolled = true,
+                                hasFaceSample = true
+                            )
+                        }
+                        currentScreen = KioskScreen.FACE_REVIEW
+                    },
+                    modifier = modifier
+                )
+            }
         }
 
         KioskScreen.FACE_REVIEW -> {
             val activeEmployee = selectedEmployee ?: defaultFallbackEmployee
-            val empId = activeEmployee.id.ifBlank { activeEmployee.code }
+            val empId = selectedEmployeeId ?: activeEmployee.id.ifBlank { activeEmployee.code }
 
-            FaceReviewScreen(
-                employee = activeEmployee,
-                capturedBitmap = capturedBitmap,
-                qualityMetrics = faceQualityMetrics ?: FaceQualityMetrics(),
-                onNavigateBack = {
-                    currentScreen = KioskScreen.EMPLOYEE_DETAIL
-                },
-                onRetakeSample = {
-                    coroutineScope.launch {
-                        employeeRepository.deleteFaceSamples(empId)
-                    }
-                    capturedBitmap = null
-                    faceQualityMetrics = null
-                    shouldRefreshEmployeeList = true
-                    currentScreen = KioskScreen.FACE_CAPTURE
-                },
-                onConfirmEnrollment = { id ->
-                    coroutineScope.launch {
-                        val updated = employeeRepository.getEmployeeById(id).getOrNull()
-                        selectedEmployee = updated ?: activeEmployee.copy(
-                            isFaceEnrolled = true,
-                            hasFaceSample = true
-                        )
-                        shouldRefreshEmployeeList = true
+            androidx.compose.runtime.key(empId) {
+                FaceReviewScreen(
+                    employee = activeEmployee,
+                    capturedBitmap = capturedBitmap,
+                    qualityMetrics = faceQualityMetrics ?: FaceQualityMetrics(),
+                    onNavigateBack = {
+                        capturedBitmap = null
+                        faceQualityMetrics = null
                         currentScreen = KioskScreen.EMPLOYEE_DETAIL
-                    }
-                },
-                modifier = modifier
-            )
+                    },
+                    onRetakeSample = {
+                        coroutineScope.launch {
+                            employeeRepository.deleteFaceSamples(empId)
+                            employeeRepository.clearDetailCache(empId)
+                        }
+                        capturedBitmap = null
+                        faceQualityMetrics = null
+                        shouldRefreshEmployeeList = true
+                        currentScreen = KioskScreen.FACE_CAPTURE
+                    },
+                    onConfirmEnrollment = { id ->
+                        coroutineScope.launch {
+                            employeeRepository.clearDetailCache(id)
+                            val updated = employeeRepository.getEmployeeById(id).getOrNull()
+                            selectedEmployee = updated ?: activeEmployee.copy(
+                                isFaceEnrolled = true,
+                                hasFaceSample = true
+                            )
+                            shouldRefreshEmployeeList = true
+                            currentScreen = KioskScreen.EMPLOYEE_DETAIL
+                        }
+                    },
+                    modifier = modifier
+                )
+            }
         }
     }
 }

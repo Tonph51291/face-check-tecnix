@@ -22,7 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -38,18 +39,19 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.company.attendance.presentation.enrollment.TurnGuidanceState
 
 /**
  * Khung ngắm Camera AI chuẩn Stitch (CameraViewfinder):
- * - Tỉ lệ khung 3:3.6 bo góc 16dp (rounded-2xl) với nền đen và viền zinc-800.
- * - 4 góc kim loại HUD tối giản zinc-400.
+ * - Tỉ lệ khung 3:3.6 bo góc 16dp với nền đen và viền zinc-800.
  * - Top HUD Guidance Banner: Đặt phía trên Oval, nền tối mờ chống chói, chữ to rõ (14-15sp) với icon trạng thái phân màu trực quan.
- * - Khung Oval trung tâm: Hoàn toàn trong suốt, KHÔNG có chữ/icon đè lên mặt người dùng; viền đổi màu theo trạng thái căn chỉnh (Vàng -> Xanh).
- * - Bottom HUD Quality Meter: Hiển thị tiến độ giữ yên thực tế (0% -> 100%), loại bỏ số % ảo.
+ * - Khung Oval trung tâm: Hoàn toàn trong suốt, viền đổi màu theo trạng thái (Vàng: chờ xoay, Đỏ: quá đà/nghiêng, Xanh: góc chuẩn tích lũy).
+ * - Mũi tên chỉ hướng động: Xuất hiện nhấp nháy bên trái/phải khung oval khi cần người dùng quay đầu.
+ * - Bottom HUD Quality Meter: Hiển thị tiến độ giữ yên thực tế (0% -> 100%).
  */
 @Composable
 fun FaceViewfinderHud(
@@ -59,13 +61,27 @@ fun FaceViewfinderHud(
     stabilityProgress: Float = 0f,
     isAligned: Boolean = false,
     isUploading: Boolean = false,
+    guidanceState: TurnGuidanceState = TurnGuidanceState.WAITING_TURN,
+    showLeftArrow: Boolean = false,
+    showRightArrow: Boolean = false,
     cameraContent: (@Composable () -> Unit)? = null
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "hud_anim_transition")
+    val arrowFloatOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(650, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "arrow_float"
+    )
+
     val ovalColor = when {
         isUploading -> Color(0xFF818CF8) // Indigo
-        isAligned && stabilityProgress > 0.5f -> Color(0xFF10B981) // Emerald-500 sáng rõ
-        isAligned -> Color(0xFF38BDF8) // Sky-400
-        else -> Color(0xFFF59E0B) // Amber-500 nổi bật báo cần căn chỉnh
+        guidanceState == TurnGuidanceState.ALIGNED_HOLDING -> Color(0xFF10B981) // Emerald-500
+        guidanceState == TurnGuidanceState.TURN_TOO_FAR || guidanceState == TurnGuidanceState.HEAD_TILTED -> Color(0xFFEF4444) // Red-500
+        else -> Color(0xFFF59E0B) // Amber-500
     }
 
     Box(
@@ -81,7 +97,7 @@ fun FaceViewfinderHud(
                 val strokeWidth = 2.5.dp.toPx()
                 val radius = 4.dp.toPx()
                 val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                val cornerColor = Color(0xFFA1A1AA) // zinc-400
+                val cornerColor = Color(0xFFA1A1AA)
 
                 // Top-Left
                 val pathTL = Path().apply {
@@ -134,15 +150,15 @@ fun FaceViewfinderHud(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // TOP HUD GUIDANCE BANNER: Đặt phía trên Oval, tương phản cao, chữ to rõ ràng
+            // TOP HUD GUIDANCE BANNER
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.92f)
+                    .fillMaxWidth(0.95f)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xEE0F172A)) // slate-900 mờ 93% chống chói hoàn hảo
+                    .background(Color(0xEE0F172A))
                     .border(
                         width = 1.dp,
-                        color = if (isAligned) Color(0xFF10B981) else Color(0xFFF59E0B),
+                        color = ovalColor.copy(alpha = 0.8f),
                         shape = RoundedCornerShape(12.dp)
                     )
                     .padding(horizontal = 14.dp, vertical = 8.dp)
@@ -152,7 +168,6 @@ fun FaceViewfinderHud(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Status Dot / Spinner
                     if (isUploading) {
                         CircularProgressIndicator(
                             color = Color(0xFF60A5FA),
@@ -164,18 +179,20 @@ fun FaceViewfinderHud(
                             modifier = Modifier
                                 .size(10.dp)
                                 .clip(CircleShape)
-                                .background(if (isAligned) Color(0xFF10B981) else Color(0xFFF59E0B))
+                                .background(ovalColor)
                         )
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = when {
-                                isUploading -> "Đang gửi dữ liệu AI..."
-                                isAligned -> "Khuôn mặt hợp lệ • Giữ yên"
-                                else -> distanceText.ifBlank { "Chưa căn chuẩn vị trí" }
+                                isUploading -> "Đang lưu mẫu khuôn mặt..."
+                                guidanceState == TurnGuidanceState.ALIGNED_HOLDING -> "Góc chuẩn xác • Giữ yên"
+                                guidanceState == TurnGuidanceState.TURN_TOO_FAR -> "Quay quá đà • Cần chỉnh lại"
+                                guidanceState == TurnGuidanceState.HEAD_TILTED -> "Đầu chưa thẳng"
+                                else -> distanceText.ifBlank { "Chờ căn chỉnh vị trí" }
                             },
-                            fontSize = 13.5.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -183,53 +200,136 @@ fun FaceViewfinderHud(
                             text = guidanceMessage,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            color = if (isAligned) Color(0xFFA7F3D0) else Color(0xFFFDE68A),
+                            color = when (guidanceState) {
+                                TurnGuidanceState.ALIGNED_HOLDING -> Color(0xFFA7F3D0)
+                                TurnGuidanceState.TURN_TOO_FAR, TurnGuidanceState.HEAD_TILTED -> Color(0xFFFCA5A5)
+                                else -> Color(0xFFFDE68A)
+                            },
                             lineHeight = 16.sp
                         )
                     }
                 }
             }
 
-            // CENTER AI OVAL GUIDE: Trong suốt hoàn toàn để người dùng thấy rõ mặt mình
+            // CENTER AI OVAL GUIDE & DIRECTION ARROWS
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.70f)
-                    .aspectRatio(0.82f)
-                    .clip(RoundedCornerShape(50))
-                    .drawBehind {
-                        drawOval(
-                            color = ovalColor,
-                            style = Stroke(
-                                width = 3.dp.toPx(),
-                                pathEffect = if (isAligned) null else PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
-                            )
-                        )
-                    },
+                    .fillMaxWidth()
+                    .weight(1f),
                 contentAlignment = Alignment.Center
             ) {
-                // Chỉ hiển thị overlay khi đang upload mẫu, khi chụp bình thường để trống 100%
-                if (isUploading) {
+                // Khung Oval
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.68f)
+                        .aspectRatio(0.82f)
+                        .clip(RoundedCornerShape(50))
+                        .drawBehind {
+                            drawOval(
+                                color = ovalColor,
+                                style = if (guidanceState == TurnGuidanceState.ALIGNED_HOLDING) {
+                                    Stroke(width = 3.5.dp.toPx())
+                                } else {
+                                    Stroke(
+                                        width = 3.dp.toPx(),
+                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                                    )
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isUploading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0x990F172A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFF60A5FA),
+                                    modifier = Modifier.size(44.dp),
+                                    strokeWidth = 3.5.dp
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "Đang lưu mẫu...",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // MŨI TÊN CHỈ HƯỚNG QUAY TRÁI (Bên trái oval)
+                if (showLeftArrow && !isUploading) {
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0x990F172A)),
-                        contentAlignment = Alignment.Center
+                            .align(Alignment.CenterStart)
+                            .padding(start = 12.dp)
+                            .graphicsLayer {
+                                translationX = -arrowFloatOffset
+                            }
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xD90F172A))
+                            .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            CircularProgressIndicator(
-                                color = Color(0xFF60A5FA),
-                                modifier = Modifier.size(44.dp),
-                                strokeWidth = 3.5.dp
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Quay Trái",
+                                tint = Color(0xFFF59E0B),
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = "Đang lưu mẫu khuôn mặt...",
-                                fontSize = 13.5.sp,
+                                text = "QUAY TRÁI",
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = Color(0xFFFDE68A)
+                            )
+                        }
+                    }
+                }
+
+                // MŨI TÊN CHỈ HƯỚNG QUAY PHẢI (Bên phải oval)
+                if (showRightArrow && !isUploading) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 12.dp)
+                            .graphicsLayer {
+                                translationX = arrowFloatOffset
+                            }
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xD90F172A))
+                            .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "QUAY PHẢI",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFDE68A)
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Quay Phải",
+                                tint = Color(0xFFF59E0B),
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }

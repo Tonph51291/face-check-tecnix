@@ -5,7 +5,6 @@ package com.company.attendance.presentation.enrollment
  */
 sealed interface EnrollmentUiEvent {
     data class OnSearchQueryChanged(val query: String) : EnrollmentUiEvent
-    data class OnSelectDepartment(val department: String) : EnrollmentUiEvent
     data object OnClearSearch : EnrollmentUiEvent
     data object OnRefresh : EnrollmentUiEvent
 }

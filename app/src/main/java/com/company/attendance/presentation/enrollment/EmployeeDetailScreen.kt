@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.company.attendance.domain.model.Employee
 import com.company.attendance.domain.model.EmployeeDetail
 import com.company.attendance.presentation.enrollment.components.AttendanceHistoryCard
 import com.company.attendance.presentation.enrollment.components.BiometricStatusSpotlightCard
@@ -57,11 +58,11 @@ import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 fun EmployeeDetailScreen(
     employeeId: String,
     onNavigateBack: () -> Unit,
-    onStartFaceCapture: () -> Unit,
+    onStartFaceCapture: (Employee) -> Unit,
     modifier: Modifier = Modifier,
     capturedBitmap: Bitmap? = null,
     forceRefresh: Boolean = false,
-    viewModel: EmployeeDetailViewModel = viewModel()
+    viewModel: EmployeeDetailViewModel = viewModel(key = "EmployeeDetail_$employeeId")
 ) {
     // 1. Kích hoạt lấy dữ liệu (tự động dùng LRU Cache nếu có, ép làm mới nếu forceRefresh = true)
     LaunchedEffect(employeeId, forceRefresh) {
@@ -72,7 +73,12 @@ fun EmployeeDetailScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     // 3. Ổn định callback
-    val onNavigateBackStable = remember(onNavigateBack) { onNavigateBack }
+    val onNavigateBackStable = remember(onNavigateBack) {
+        {
+            viewModel.clear()
+            onNavigateBack()
+        }
+    }
     val onStartFaceCaptureStable = remember(onStartFaceCapture) { onStartFaceCapture }
 
     EmployeeDetailContent(
@@ -98,7 +104,7 @@ fun EmployeeDetailContent(
     isLoading: Boolean,
     errorMessage: String?,
     onNavigateBack: () -> Unit,
-    onStartFaceCapture: () -> Unit,
+    onStartFaceCapture: (Employee) -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {

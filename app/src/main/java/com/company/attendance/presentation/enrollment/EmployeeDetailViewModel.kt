@@ -31,8 +31,17 @@ class EmployeeDetailViewModel(
             // Đã có dữ liệu trong bộ nhớ của màn hình hiện tại, không cần gọi lại
             return
         }
+        val isNewEmployee = currentEmployeeId != employeeId
         currentEmployeeId = employeeId
+        if (isNewEmployee) {
+            _uiState.update { it.copy(detail = null, isLoading = true, errorMessage = null) }
+        }
         fetchEmployeeDetail(employeeId, forceRefresh)
+    }
+
+    fun clear() {
+        currentEmployeeId = null
+        _uiState.value = EmployeeDetailUiState(isLoading = true)
     }
 
     fun refresh() {

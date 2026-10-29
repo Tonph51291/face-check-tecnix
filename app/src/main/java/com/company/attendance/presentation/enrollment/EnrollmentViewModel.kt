@@ -13,11 +13,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 
 /**
@@ -33,23 +31,16 @@ class EnrollmentViewModel(
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
-    private val _selectedDepartment = MutableStateFlow("Tất cả")
 
     private val _uiState = MutableStateFlow(EnrollmentUiState())
     val uiState: StateFlow<EnrollmentUiState> = _uiState.asStateFlow()
 
     // Tối ưu hóa: Tránh sử dụng Flow.map trung gian, lắng nghe trực tiếp luồng tìm kiếm và phòng ban
-    val employeesPagingFlow: Flow<PagingData<Employee>> = combine(
-        _searchQuery.debounce { if (it.isEmpty()) 0L else 300L },
-        _selectedDepartment
-    ) { query, dept ->
-        Pair(query, dept)
-    }
-        .distinctUntilChanged()
-        .flatMapLatest { (query, dept) ->
-            listEmployeeUseCase(query = query, department = dept)
-        }
-        .cachedIn(viewModelScope)
+    val employeesPagingFlow: Flow<PagingData<Employee>> =
+        _searchQuery.debounce { if (it.isEmpty()) 0L else 300L }.distinctUntilChanged()
+            .flatMapLatest { query ->
+                listEmployeeUseCase(query = query)
+            }.cachedIn(viewModelScope)
 
     fun onEvent(event: EnrollmentUiEvent) {
         when (event) {
@@ -57,14 +48,12 @@ class EnrollmentViewModel(
                 _searchQuery.value = event.query
                 _uiState.update { it.copy(searchQuery = event.query) }
             }
-            is EnrollmentUiEvent.OnSelectDepartment -> {
-                _selectedDepartment.value = event.department
-                _uiState.update { it.copy(selectedDepartment = event.department) }
-            }
+
             is EnrollmentUiEvent.OnClearSearch -> {
                 _searchQuery.value = ""
                 _uiState.update { it.copy(searchQuery = "") }
             }
+
             is EnrollmentUiEvent.OnRefresh -> {
                 // UI sẽ gọi trực tiếp lazyPagingItems.refresh()
             }

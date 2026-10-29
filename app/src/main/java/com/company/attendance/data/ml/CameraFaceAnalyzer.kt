@@ -7,38 +7,38 @@ import androidx.camera.core.ImageProxy
 import com.company.attendance.domain.ml.FaceQualityChecker
 import com.company.attendance.domain.model.FaceAlignmentStatus
 import com.company.attendance.domain.model.FaceDetectionData
+import com.company.attendance.domain.model.FaceTrackItem
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 
 /**
- * CameraFaceAnalyzer: Phân tích từng frame CameraX bằng Google ML Kit Face Detection (On-Device, Offline, Apache 2.0).
- * Quản lý vòng đời frame, tự động điều tiết tốc độ (throttling) để bảo vệ CPU/pin của thiết bị Kiosk.
+ * CameraFaceAnalyzer: Phân tích từng frame CameraX bằng Google ML Kit Face Detection.
+ * Hỗ trợ nhận diện nhiều khuôn mặt (Multi-Face Tracking), tự động chọn người ưu tiên.
  */
 class CameraFaceAnalyzer(
     private val qualityChecker: FaceQualityChecker = FaceQualityChecker(),
     private val onAnalysisResult: (FaceDetectionData?) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    // Cấu hình ML Kit Face Detector tối ưu cho Kiosk realtime video
+    // Cấu hình ML Kit Face Detector:
+    // - Bật CLASSIFICATION_MODE_ALL để kiểm tra đặc trưng mắt (loại bỏ nhiễu tường/vật thể vô tri)
+    // - minFaceSize = 0.15f (15%) để bỏ qua các chi tiết nhỏ ở hậu cảnh
     private val options = FaceDetectorOptions.Builder()
         .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
         .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-        .setMinFaceSize(0.12f)
+        .setMinFaceSize(0.15f)
         .enableTracking()
         .build()
 
     private val detector: FaceDetector = FaceDetection.getClient(options)
-
-    // Throttling: giới hạn tối đa 7-8 frame/giây (~130ms/frame) để tránh quá tải nhiệt
-    private var lastAnalyzedTimestamp = 0L
-    private val throttleIntervalMs = 130L
+    private val isProcessing = java.util.concurrent.atomic.AtomicBoolean(false)
 
     @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
-        val currentTimestamp = System.currentTimeMillis()
-        if (currentTimestamp - lastAnalyzedTimestamp < throttleIntervalMs) {
+        // Chỉ xử lý 1 frame tại 1 thời điểm, tự động bỏ qua frame cũ (zero latency)
+        if (!isProcessing.compareAndSet(false, true)) {
             imageProxy.close()
             return
         }
@@ -46,6 +46,7 @@ class CameraFaceAnalyzer(
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
             imageProxy.close()
+            isProcessing.set(false)
             return
         }
 
@@ -59,56 +60,76 @@ class CameraFaceAnalyzer(
 
         detector.process(inputImage)
             .addOnSuccessListener { faces ->
-                lastAnalyzedTimestamp = currentTimestamp
-
                 if (faces.isEmpty()) {
                     onAnalysisResult(null)
                     return@addOnSuccessListener
                 }
 
-                if (faces.size > 1) {
-                    val primaryFace = faces[0]
-                    onAnalysisResult(
-                        FaceDetectionData(
-                            boundingBox = primaryFace.boundingBox,
-                            headEulerAngleX = primaryFace.headEulerAngleX,
-                            headEulerAngleY = primaryFace.headEulerAngleY,
-                            headEulerAngleZ = primaryFace.headEulerAngleZ,
-                            trackingId = primaryFace.trackingId,
-                            imageWidth = rotatedWidth,
-                            imageHeight = rotatedHeight,
-                            rotationDegrees = rotationDegrees,
-                            alignmentStatus = FaceAlignmentStatus.MULTIPLE_FACES,
-                            guidanceMessage = "Phát hiện nhiều người. Vui lòng chỉ một người đứng trước camera."
-                        )
-                    )
-                    return@addOnSuccessListener
-                }
+                // Chuyển đổi và lọc bỏ các khuôn mặt giả lập (Ghost/Phantom Face) do nhiễu môi trường:
+                // 1. Kích thước tối thiểu: Chiều rộng và chiều cao >= 80px
+                // 2. Tỉ lệ khung hình (Aspect Ratio = w / h): Khuôn mặt người thật luôn nằm trong khoảng 0.60 .. 1.45
+                val trackedFaces = faces.mapNotNull { face ->
+                    val box = face.boundingBox
+                    val w = box.width()
+                    val h = box.height()
+                    if (w < 80 || h < 80) return@mapNotNull null
+                    val aspectRatio = w.toFloat() / h.toFloat()
+                    if (aspectRatio !in 0.60f..1.45f) return@mapNotNull null
 
-                val face = faces[0]
-                val evaluation = qualityChecker.evaluate(
-                    boundingBox = face.boundingBox,
-                    imageWidth = rotatedWidth,
-                    imageHeight = rotatedHeight,
-                    angleX = face.headEulerAngleX,
-                    angleY = face.headEulerAngleY,
-                    angleZ = face.headEulerAngleZ
-                )
-
-                onAnalysisResult(
-                    FaceDetectionData(
-                        boundingBox = face.boundingBox,
+                    FaceTrackItem(
+                        boundingBox = box,
+                        trackingId = face.trackingId,
                         headEulerAngleX = face.headEulerAngleX,
                         headEulerAngleY = face.headEulerAngleY,
                         headEulerAngleZ = face.headEulerAngleZ,
                         leftEyeOpenProbability = face.leftEyeOpenProbability,
                         rightEyeOpenProbability = face.rightEyeOpenProbability,
-                        smilingProbability = face.smilingProbability,
-                        trackingId = face.trackingId,
+                        smilingProbability = face.smilingProbability
+                    )
+                }
+
+                if (trackedFaces.isEmpty()) {
+                    onAnalysisResult(null)
+                    return@addOnSuccessListener
+                }
+
+                val allBoundingBoxes = trackedFaces.map { it.boundingBox }
+
+                // Chọn người ưu tiên (Primary Face):
+                // 1. Ưu tiên khuôn mặt có đặc trưng hợp lệ (không phải đồ vật)
+                // 2. Ưu tiên người đang nhìn thẳng (isLookingStraight)
+                // 3. Ưu tiên người có diện tích lớn nhất (đứng gần camera nhất)
+                val primaryFace = trackedFaces.filter { it.hasValidFaceFeatures }.maxWithOrNull(
+                    compareBy<FaceTrackItem> { it.isLookingStraight }
+                        .thenBy { it.area }
+                ) ?: trackedFaces.first()
+
+                val evaluation = qualityChecker.evaluate(
+                    boundingBox = primaryFace.boundingBox,
+                    imageWidth = rotatedWidth,
+                    imageHeight = rotatedHeight,
+                    angleX = primaryFace.headEulerAngleX,
+                    angleY = primaryFace.headEulerAngleY,
+                    angleZ = primaryFace.headEulerAngleZ
+                )
+
+                onAnalysisResult(
+                    FaceDetectionData(
+                        boundingBox = primaryFace.boundingBox,
+                        allFaces = allBoundingBoxes,
+                        trackedFaces = trackedFaces,
+                        primaryFace = primaryFace,
+                        headEulerAngleX = primaryFace.headEulerAngleX,
+                        headEulerAngleY = primaryFace.headEulerAngleY,
+                        headEulerAngleZ = primaryFace.headEulerAngleZ,
+                        leftEyeOpenProbability = primaryFace.leftEyeOpenProbability,
+                        rightEyeOpenProbability = primaryFace.rightEyeOpenProbability,
+                        smilingProbability = primaryFace.smilingProbability,
+                        trackingId = primaryFace.trackingId,
                         imageWidth = rotatedWidth,
                         imageHeight = rotatedHeight,
                         rotationDegrees = rotationDegrees,
-                        alignmentStatus = evaluation.status,
+                        alignmentStatus = if (trackedFaces.size > 1) FaceAlignmentStatus.ALIGNED else evaluation.status,
                         guidanceMessage = evaluation.message
                     )
                 )
@@ -117,8 +138,9 @@ class CameraFaceAnalyzer(
                 onAnalysisResult(null)
             }
             .addOnCompleteListener {
-                // Tuyệt đối luôn đóng imageProxy trong mọi tình huống để không nghẽn CameraX pipeline
+                // Tuyệt đối luôn đóng imageProxy và giải phóng cờ để frame tiếp theo được nhận ngay lập tức
                 imageProxy.close()
+                isProcessing.set(false)
             }
     }
 

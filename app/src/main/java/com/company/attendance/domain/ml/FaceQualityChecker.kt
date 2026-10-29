@@ -48,26 +48,26 @@ class FaceQualityChecker {
         val faceCenterX = boundingBox.centerX().toFloat() / imageWidth
         val faceCenterY = boundingBox.centerY().toFloat() / imageHeight
 
-        // 1. Kiểm tra góc quay đầu (Head Pose)
-        if (kotlin.math.abs(angleY) > 16f) {
+        // 1. Kiểm tra góc quay đầu tự nhiên (Head Pose - dung sai rộng chuẩn Kiosk)
+        if (kotlin.math.abs(angleY) > 24f) {
             return QualityEvaluation(
                 status = FaceAlignmentStatus.HEAD_TILTED,
-                message = "Vui lòng quay mặt nhìn thẳng vào camera",
+                message = "Vui lòng nhìn về phía camera",
                 isAligned = false,
                 estimatedDistanceText = "Cần chỉnh góc"
             )
         }
 
-        if (kotlin.math.abs(angleX) > 18f) {
+        if (kotlin.math.abs(angleX) > 22f) {
             return QualityEvaluation(
                 status = FaceAlignmentStatus.HEAD_TILTED,
-                message = if (angleX > 0) "Vui lòng hạ cằm một chút" else "Vui lòng nâng cằm nhìn thẳng",
+                message = "Vui lòng nhìn thẳng về phía camera",
                 isAligned = false,
                 estimatedDistanceText = "Cần chỉnh góc"
             )
         }
 
-        if (kotlin.math.abs(angleZ) > 14f) {
+        if (kotlin.math.abs(angleZ) > 20f) {
             return QualityEvaluation(
                 status = FaceAlignmentStatus.HEAD_TILTED,
                 message = "Vui lòng giữ thẳng đầu",
@@ -76,59 +76,50 @@ class FaceQualityChecker {
             )
         }
 
-        // 2. Kiểm tra khoảng cách / kích thước mặt
+        // 2. Kiểm tra khoảng cách / kích thước mặt (Hỗ trợ từ 0.5m đến 2m)
         val distanceText: String
         when {
-            faceCoverageRatio < 0.08f -> {
+            faceCoverageRatio < 0.04f -> {
                 return QualityEvaluation(
                     status = FaceAlignmentStatus.TOO_FAR,
                     message = "Vui lòng bước lại gần camera hơn",
                     isAligned = false,
-                    estimatedDistanceText = "Quá xa (> 1.2m)"
+                    estimatedDistanceText = "Quá xa (> 2m)"
                 )
             }
-            faceCoverageRatio > 0.50f -> {
+            faceCoverageRatio > 0.65f -> {
                 return QualityEvaluation(
                     status = FaceAlignmentStatus.TOO_CLOSE,
                     message = "Vui lòng lùi xa một chút",
                     isAligned = false,
-                    estimatedDistanceText = "Quá gần (< 40cm)"
+                    estimatedDistanceText = "Quá gần (< 30cm)"
                 )
             }
-            faceCoverageRatio < 0.14f -> {
-                distanceText = "Khoảng cách: ~90cm"
+            faceCoverageRatio < 0.12f -> {
+                distanceText = "Khoảng cách: ~1.2m"
             }
             faceCoverageRatio > 0.35f -> {
                 distanceText = "Khoảng cách: ~50cm"
             }
             else -> {
-                distanceText = "Khoảng cách: 65cm (Tốt)"
+                distanceText = "Khoảng cách: 70cm (Tốt)"
             }
         }
 
-        // 3. Kiểm tra độ lệch tâm (Centering) - Cho phép dung sai 18% so với tâm khung
-        val offsetX = kotlin.math.abs(faceCenterX - 0.5f)
-        val offsetY = kotlin.math.abs(faceCenterY - 0.48f) // Khung oval kiosk hơi lệch nhẹ lên nửa trên
-
-        if (offsetX > 0.20f || offsetY > 0.22f) {
-            val directionHint = buildString {
-                append("Vui lòng di chuyển khuôn mặt vào giữa khung oval")
-                if (offsetX > 0.20f) {
-                    append(if (faceCenterX < 0.5f) " (sang phải)" else " (sang trái)")
-                }
-            }
+        // 3. Kiểm tra mép khung hình: Chỉ cần khuôn mặt không bị cắt cụt sát rìa màn hình
+        if (faceCenterX !in 0.06f..0.94f || faceCenterY !in 0.06f..0.94f) {
             return QualityEvaluation(
                 status = FaceAlignmentStatus.OFF_CENTER,
-                message = directionHint,
+                message = "Vui lòng đứng vào tầm nhìn của camera",
                 isAligned = false,
                 estimatedDistanceText = distanceText
             )
         }
 
-        // Mọi chỉ số đạt tiêu chuẩn
+        // Mọi chỉ số đạt tiêu chuẩn quét tự do
         return QualityEvaluation(
             status = FaceAlignmentStatus.ALIGNED,
-            message = "Khuôn mặt chuẩn. Vui lòng giữ yên...",
+            message = "Đã khóa nét khuôn mặt...",
             isAligned = true,
             estimatedDistanceText = distanceText
         )

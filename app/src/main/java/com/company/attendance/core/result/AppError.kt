@@ -11,6 +11,11 @@ sealed interface AppError {
     data class FaceQualityTooLow(override val message: String = "Chất lượng khuôn mặt chưa đạt tiêu chuẩn nhận diện.") : AppError
     data class LivenessFailed(override val message: String = "Không vượt qua kiểm tra thực thể sống.") : AppError
     data class MultipleFaces(override val message: String = "Phát hiện nhiều khuôn mặt cùng lúc trong khung hình.") : AppError
+    data class FaceConflict(override val message: String) : AppError // HTTP 409: Trùng mặt với nhân viên khác
+    data class FaceSampleMismatch(override val message: String) : AppError // HTTP 400: Không khớp mẫu trước đó
+    data class InvalidVector(override val message: String = "Vector khuôn mặt không hợp lệ.") : AppError
+    data class AccountDisabled(override val message: String = "Tài khoản nhân viên này hiện đang bị khóa hoặc đã nghỉ việc.") : AppError
+    data class DeviceUnauthorized(override val message: String = "Thiết bị không được phép truy cập (Sai mã X-Device-Key).") : AppError
 
     // Lỗi dữ liệu nhân viên
     data class EmployeeNotFound(override val message: String = "Không tìm thấy thông tin nhân viên.") : AppError

@@ -233,19 +233,50 @@ data class EmployeeDetailResponseDto(
 
 /**
  * DTO gửi yêu cầu đăng ký khuôn mặt:
- * POST /users/{id}/enroll-face
+ * POST /users/{id}/enroll-face (hoặc /api/users/{id}/enroll-face)
+ * Hỗ trợ cả Batch Enrollment (vectors: 3 vector 512D) và Single Sample Enrollment.
  */
 data class EnrollFaceRequestDto(
+    @SerializedName("vectors")
+    val vectors: List<List<Float>>? = null,
+
+    @SerializedName("faceImageBase64")
+    val faceImageBase64: String? = null,
+
     @SerializedName("sample_index")
     val sampleIndex: Int? = null,
 
-    @SerializedName("faceImageBase64")
-    val faceImageBase64: String? = null
+    @SerializedName("face_vector")
+    val faceVector: List<Float>? = null
 )
 
 data class EnrollFaceDataDto(
+    @SerializedName("user_id")
+    val userId: Long? = null,
+
+    @SerializedName("user_name")
+    val userName: String? = null,
+
     @SerializedName("employeeId")
     val employeeId: String? = null,
+
+    @SerializedName("sample_index")
+    val sampleIndex: Int? = null,
+
+    @SerializedName("samples_enrolled")
+    val samplesEnrolled: Int = 0,
+
+    @SerializedName("total_samples")
+    val totalSamples: Int = 3,
+
+    @SerializedName("is_completed")
+    val isCompleted: Boolean = false,
+
+    @SerializedName("is_face_enrolled")
+    val isFaceEnrolled: Boolean = false,
+
+    @SerializedName("avatar_url")
+    val avatarUrl: String? = null,
 
     @SerializedName("hasFaceSample")
     val hasFaceSample: Boolean = false,
@@ -273,17 +304,6 @@ data class DeleteFaceSamplesResponseDto(
 
 /**
  * DTO Response bọc kết quả đăng ký mẫu từ POST /users/{id}/enroll-face:
- * {
- *   "id": 4,
- *   "user_id": 4,
- *   "sample_index": 1,
- *   "samples_enrolled": 1,
- *   "total_samples": 3,
- *   "is_completed": false,
- *   "is_face_enrolled": false,
- *   "photo_path": "storage/faces/4_1.jpg",
- *   "message": "Đã lưu mẫu khuôn mặt số 1 thành công (1/3)"
- * }
  */
 data class EnrollFaceResponseDto(
     @SerializedName("id")
@@ -291,6 +311,9 @@ data class EnrollFaceResponseDto(
 
     @SerializedName("user_id")
     val userId: Long? = null,
+
+    @SerializedName("user_name")
+    val userName: String? = null,
 
     @SerializedName("sample_index")
     val sampleIndex: Int? = null,
@@ -310,10 +333,15 @@ data class EnrollFaceResponseDto(
     @SerializedName("photo_path")
     val photoPath: String? = null,
 
+    @SerializedName("avatar_url")
+    val avatarUrl: String? = null,
+
     @SerializedName("message")
     val message: String? = null,
 
-    // Tương thích ngược nếu backend trả bọc data
+    @SerializedName("code")
+    val code: Int = 200,
+
     @SerializedName("success")
     val success: Boolean = true,
 
@@ -321,10 +349,13 @@ data class EnrollFaceResponseDto(
     val data: EnrollFaceDataDto? = null
 ) {
     val effectiveSampleCount: Int
-        get() = samplesEnrolled ?: data?.sampleCount ?: sampleIndex ?: 0
+        get() = samplesEnrolled ?: data?.samplesEnrolled ?: data?.sampleCount ?: sampleIndex ?: 0
 
     val effectiveIsDone: Boolean
-        get() = isCompleted || isFaceEnrolled || (data?.hasFaceSample == true) || (effectiveSampleCount >= (totalSamples ?: 3))
+        get() = isCompleted || isFaceEnrolled || (data?.isCompleted == true) || (data?.isFaceEnrolled == true) || (data?.hasFaceSample == true) || (effectiveSampleCount >= (totalSamples ?: 3))
+
+    val effectiveAvatarUrl: String?
+        get() = avatarUrl ?: data?.avatarUrl
 }
 
 /**
@@ -344,6 +375,9 @@ data class FaceSampleItemDto(
 data class FaceSamplesResponseDto(
     @SerializedName("user_id")
     val userId: Long? = null,
+
+    @SerializedName("user_name")
+    val userName: String? = null,
 
     @SerializedName("samples_enrolled")
     val samplesEnrolled: Int = 0,
@@ -387,15 +421,23 @@ data class Rfc7807ErrorDto(
     val errors: List<ValidationErrorDto>? = null
 ) {
     val userFriendlyMessage: String?
-        get() = when {
-            !detail.isNullOrBlank() && !errors.isNullOrEmpty() -> {
-                val errs = errors.mapNotNull { it.message }.joinToString(", ")
-                if (errs.isNotBlank()) "$detail: $errs" else detail
+        get() {
+            val errList = errors?.mapNotNull { it.message?.takeIf { msg -> msg.isNotBlank() } }
+            val combinedErrors = errList?.joinToString(", ")
+
+            if (!combinedErrors.isNullOrBlank()) {
+                return if (!detail.isNullOrBlank()) {
+                    "$detail: $combinedErrors"
+                } else if (!message.isNullOrBlank() && message != "Dữ liệu yêu cầu không hợp lệ" && message != "validation failed") {
+                    "$message: $combinedErrors"
+                } else {
+                    combinedErrors
+                }
             }
-            !detail.isNullOrBlank() -> detail
-            !message.isNullOrBlank() -> message
-            !title.isNullOrBlank() -> title
-            else -> null
+
+            return detail?.takeIf { it.isNotBlank() }
+                ?: message?.takeIf { it.isNotBlank() }
+                ?: title?.takeIf { it.isNotBlank() }
         }
 }
 

@@ -44,10 +44,14 @@ class AttendanceRepositoryImpl(
         }
     }
 
-    override suspend fun checkIn(imageBase64: String): Result<AttendanceRecord> = withContext(Dispatchers.IO) {
+    override suspend fun checkIn(
+        faceVector: List<Float>,
+        imageBase64: String?
+    ): Result<AttendanceRecord> = withContext(Dispatchers.IO) {
         try {
             val idempotencyKey = UUID.randomUUID().toString()
             val request = AttendanceCheckInRequestDto(
+                faceVector = faceVector,
                 capturedImageBase64 = imageBase64,
                 deviceSerial = NetworkModule.DEVICE_SERIAL,
                 employeeId = null

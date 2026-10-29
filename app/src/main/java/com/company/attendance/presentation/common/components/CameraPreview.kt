@@ -61,11 +61,16 @@ fun CameraPreview(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     scaleType = PreviewView.ScaleType.FILL_CENTER
-                    implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                 }
 
                 onCaptureReady?.invoke {
-                    previewView.bitmap
+                    val bitmap = previewView.bitmap
+                    // [DEBUG_CAPTURE_TEST] Tự động log và lưu file ảnh test để kiểm tra độ nét
+//                    if (bitmap != null) {
+//                        com.company.attendance.core.util.DebugCaptureHelper.saveAndLogCapturedBitmap(ctx, bitmap)
+//                    }
+                    bitmap
                 }
 
                 val executor = ContextCompat.getMainExecutor(ctx)

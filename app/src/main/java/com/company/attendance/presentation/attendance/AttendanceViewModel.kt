@@ -1,20 +1,22 @@
 package com.company.attendance.presentation.attendance
 
+import android.app.Application
 import android.graphics.Bitmap
-import androidx.lifecycle.ViewModel
+import android.graphics.PointF
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.company.attendance.core.logging.logD
+import com.company.attendance.core.logging.logE
 import com.company.attendance.core.logging.logI
 import com.company.attendance.core.result.Result
 import com.company.attendance.core.util.toBase64Jpeg
 import com.company.attendance.di.RepositoryModule
+import com.company.attendance.domain.ml.FaceEmbedder
 import com.company.attendance.domain.ml.LivenessChecker
 import com.company.attendance.domain.model.AttendanceRecord
 import com.company.attendance.domain.model.FaceAlignmentStatus
 import com.company.attendance.domain.model.FaceDetectionData
 import com.company.attendance.domain.repository.AttendanceRepository
-import com.company.attendance.domain.repository.EmployeeRepository
-import com.company.attendance.domain.usecase.EnrollFaceUseCase
 import com.company.attendance.domain.usecase.RecognizeFaceUseCase
 import com.company.attendance.domain.usecase.SubmitAttendanceUseCase
 import kotlinx.coroutines.Job
@@ -33,19 +35,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class AttendanceViewModel(
+class AttendanceViewModel @JvmOverloads constructor(
+    application: Application,
     private val attendanceRepository: AttendanceRepository = RepositoryModule.attendanceRepository,
     private val recognizeFaceUseCase: RecognizeFaceUseCase = RecognizeFaceUseCase(RepositoryModule.employeeRepository),
-    private val submitAttendanceUseCase: SubmitAttendanceUseCase = SubmitAttendanceUseCase(RepositoryModule.attendanceRepository),
-    private val enrollFaceUseCase: EnrollFaceUseCase = EnrollFaceUseCase(RepositoryModule.employeeRepository),
-    private val employeeRepository: EmployeeRepository = RepositoryModule.employeeRepository
-) : ViewModel() {
+    private val submitAttendanceUseCase: SubmitAttendanceUseCase = SubmitAttendanceUseCase(RepositoryModule.attendanceRepository)
+) : AndroidViewModel(application) {
+
+    private val faceEmbedder = FaceEmbedder(application.applicationContext)
 
     private val _uiState = MutableStateFlow(AttendanceUiState())
     val uiState: StateFlow<AttendanceUiState> = _uiState.asStateFlow()
 
     private val _uiEffect = MutableSharedFlow<AttendanceUiEffect>()
-    val uiEffect: SharedFlow<AttendanceUiEffect> = _uiEffect.asSharedFlow()
 
     private val livenessChecker = LivenessChecker()
 
@@ -59,7 +61,7 @@ class AttendanceViewModel(
     private var autoDismissJob: Job? = null
     private var verificationJob: Job? = null
 
-    // Đếm số frame liên tiếp khuôn mặt nằm chuẩn vị trí
+    // Đếm số frame liên tiếp khuôn mặt ổn định
     private var consecutiveAlignedFrames = 0
     private val requiredAlignedFrames = 5 // ~650ms - 800ms giữ ổn định
 
@@ -69,7 +71,15 @@ class AttendanceViewModel(
     // Lưu trackingId và thời điểm chấm công gần nhất để chống chấm lặp liên tục
     private var lastCheckedTrackingId: Int? = null
     private var lastCheckedTimestamp: Long = 0L
-    private val duplicateCooldownMs = 15000L // 15 giây không chấm lại cùng 1 người nếu chưa rời camera
+    // Multi-Face Tracking & Cooldown
+    private val completedTrackingIds = mutableMapOf<Int, Long>()
+    private val stableFramesMap = mutableMapOf<Int, Int>()
+    private val faceCooldownDurationMs = 10000L
+    private val requiredStableFrames = 5 // ~160ms - 200ms giữ ổn định để chụp ảnh sắc nét, chống nhòe chuyển động
+
+    // Best-Shot Selection: Theo dõi độ dịch chuyển tâm mặt (motion displacement)
+    // Nếu người dùng đang bước đi quá nhanh (displacement > 18px), reset đếm ổn định để tránh chụp ảnh mờ
+    private val lastFaceCenterMap = mutableMapOf<Int, PointF>()
 
     init {
         startRealtimeClock()
@@ -157,65 +167,12 @@ class AttendanceViewModel(
                     )
                 }
             }
-            is AttendanceUiEvent.OnSelectEmployee -> {
-                _uiState.update {
-                    it.copy(
-                        selectedEmployeeId = event.employeeId,
-                        currentScreen = KioskScreen.EMPLOYEE_DETAIL
-                    )
-                }
-                viewModelScope.launch {
-                    val result = employeeRepository.getEmployeeById(event.employeeId)
-                    val emp = result.getOrNull()
-                    if (emp != null) {
-                        _uiState.update { it.copy(selectedEmployee = emp) }
-                    }
-                }
-
-
-            }
-            is AttendanceUiEvent.OnCaptureFaceSample -> {
-                _uiState.update {
-                    it.copy(
-                        capturedFaceScore = event.metrics?.sharpnessPercent ?: 98,
-                        capturedBitmap = event.bitmap,
-                        faceQualityMetrics = event.metrics,
-                        currentScreen = KioskScreen.FACE_REVIEW
-                    )
-                }
-            }
-            is AttendanceUiEvent.OnConfirmEnrollment -> {
-                viewModelScope.launch {
-                    val result = enrollFaceUseCase(event.employeeId, true)
-                    val updatedEmployee = result.getOrNull() ?: _uiState.value.selectedEmployee?.copy(hasFaceSample = true)
-                    _uiState.update {
-                        it.copy(
-                            selectedEmployee = updatedEmployee,
-                            shouldRefreshEmployeeList = true,
-                            currentScreen = KioskScreen.EMPLOYEE_DETAIL
-                        )
-                    }
-                }
-            }
-            is AttendanceUiEvent.OnRetakeFaceEnrollment -> {
-                viewModelScope.launch {
-                    employeeRepository.deleteFaceSamples(event.employeeId)
-                }
-                _uiState.update {
-                    it.copy(
-                        currentScreen = KioskScreen.FACE_CAPTURE,
-                        capturedBitmap = null,
-                        shouldRefreshEmployeeList = true
-                    )
-                }
-            }
-            is AttendanceUiEvent.OnConsumeRefreshEmployeeList -> {
-                _uiState.update { it.copy(shouldRefreshEmployeeList = false) }
-            }
-
             is AttendanceUiEvent.OnToggleRealMode -> {
                 resetToIdle()
                 _uiState.update { it.copy(isRealMode = event.isReal) }
+            }
+            is AttendanceUiEvent.OnToggleCamera -> {
+                _uiState.update { it.copy(isFrontCamera = event.isFront) }
             }
 
         }
@@ -225,6 +182,41 @@ class AttendanceViewModel(
      * Xử lý frame khuôn mặt theo State Machine:
      * IDLE -> FACE_DETECTED -> ALIGNING -> FACE_STABLE -> VERIFYING -> SUCCESS / FAILURE -> COOLDOWN -> IDLE
      */
+        /**
+     * Lựa chọn khuôn mặt ưu tiên để gửi lên server:
+     * 1. Bỏ qua các khuôn mặt đang trong thời gian Cooldown.
+     * 2. Ưu tiên người đang nhìn thẳng vào camera (isLookingStraight).
+     * 3. Ưu tiên người có diện tích khuôn mặt lớn nhất (đứng gần camera nhất).
+     */
+    private fun selectPrimaryCandidate(
+        trackedFaces: List<com.company.attendance.domain.model.FaceTrackItem>,
+        currentTime: Long
+    ): com.company.attendance.domain.model.FaceTrackItem? {
+        completedTrackingIds.entries.removeAll { (currentTime - it.value) > faceCooldownDurationMs }
+
+        val availableFaces = trackedFaces.filter { face ->
+            val id = face.trackingId ?: return@filter true
+            val lastProcessed = completedTrackingIds[id] ?: 0L
+            (currentTime - lastProcessed) > faceCooldownDurationMs
+        }
+
+        if (availableFaces.isEmpty()) return null
+
+        return availableFaces.filter { it.hasValidFaceFeatures }.maxWithOrNull(
+            compareBy<com.company.attendance.domain.model.FaceTrackItem> { it.isLookingStraight }
+                .thenBy { it.area }
+        )
+    }
+
+    /**
+     * Xử lý frame khuôn mặt theo State Machine:
+     * IDLE -> FACE_DETECTED -> ALIGNING -> FACE_STABLE -> VERIFYING -> SUCCESS / FAILURE -> COOLDOWN -> IDLE
+     *
+     * Hỗ trợ quét nhiều người đồng thời:
+     * - Tự động chọn người ưu tiên tốt nhất (Primary Candidate): Người nhìn thẳng + đứng gần camera nhất.
+     * - Khi người ưu tiên đạt độ ổn định (giữ yên ~350ms): Chụp và gửi lên Server.
+     * - Sau khi quét xong: Người đó được đưa vào Cooldown để tự động chuyển sang người thứ 2 ngay lập tức!
+     */
     private fun handleFaceFrame(faceData: FaceDetectionData?) {
         val currentStatus = _uiState.value.status
 
@@ -233,9 +225,8 @@ class AttendanceViewModel(
             currentStatus == RecognitionStatus.DUPLICATE ||
             currentStatus == RecognitionStatus.FAILURE
         ) {
-            // Trường hợp A: Phát hiện người mới bước vào ngay (trackingId khác hẳn người vừa chấm)
             if (faceData?.trackingId != null && faceData.trackingId != lastCheckedTrackingId) {
-                logI("Phát hiện người mới bước vào camera (trackingId: ${faceData.trackingId} != $lastCheckedTrackingId) -> Đổi lượt quét ngay lập tức")
+                logI("Phát hiện người mới bước vào camera (trackingId: ${faceData.trackingId} != $lastCheckedTrackingId) -> Đổi lượt quét ngay")
                 autoDismissJob?.cancel()
                 _uiState.update {
                     it.copy(
@@ -246,13 +237,10 @@ class AttendanceViewModel(
                         stabilityProgress = 0f
                     )
                 }
-                // Không return -> rơi xuống luồng dưới để bắt đầu căn chỉnh và nhận diện người mới ngay!
             } else if (faceData == null) {
-                // Trường hợp B: Người vừa chấm đã rời khỏi khung hình
                 clearanceNoFaceFrames++
-                if (clearanceNoFaceFrames >= 2) { // 2 frame (~200ms) không còn mặt trong camera
+                if (clearanceNoFaceFrames >= 2) {
                     clearanceNoFaceFrames = 0
-                    // Cho phép đóng kết quả sớm nếu người cũ đã rời đi
                     if (_uiState.value.autoDismissRemainingSeconds <= 1) {
                         resetToIdle()
                         return
@@ -260,7 +248,6 @@ class AttendanceViewModel(
                 }
                 return
             } else {
-                // Người cũ vẫn đang đứng trước camera xem kết quả
                 clearanceNoFaceFrames = 0
                 return
             }
@@ -274,9 +261,8 @@ class AttendanceViewModel(
             return
         }
 
-        // Kiểm tra cơ chế Face Clearance: Bắt buộc người vừa chấm phải rời khỏi camera
+        // Kiểm tra cơ chế Face Clearance
         if (_uiState.value.isWaitingFaceClearance) {
-            // Nếu phát hiện người mới (trackingId khác người vừa chấm) -> Mở khóa Face Clearance ngay lập tức!
             if (faceData?.trackingId != null && faceData.trackingId != lastCheckedTrackingId) {
                 logI("Người mới xuất hiện trong thời gian chờ clearance (trackingId: ${faceData.trackingId}) -> Mở khóa quét ngay")
                 clearanceNoFaceFrames = 0
@@ -286,10 +272,9 @@ class AttendanceViewModel(
                         stabilityProgress = 0f
                     )
                 }
-                // Rơi xuống luồng dưới để xử lý khuôn mặt người mới ngay lập tức
             } else if (faceData == null) {
                 clearanceNoFaceFrames++
-                if (clearanceNoFaceFrames >= 2) { // ~200ms không còn mặt trong khung hình là đủ xác nhận đã rời đi
+                if (clearanceNoFaceFrames >= 2) {
                     clearanceNoFaceFrames = 0
                     _uiState.update {
                         it.copy(
@@ -302,7 +287,6 @@ class AttendanceViewModel(
                 }
                 return
             } else {
-                // Vẫn là người cũ chưa rời đi -> Hiển thị thông báo nhường vị trí với status COOLDOWN
                 clearanceNoFaceFrames = 0
                 _uiState.update {
                     it.copy(
@@ -317,16 +301,22 @@ class AttendanceViewModel(
             }
         }
 
-        // 1. Không có khuôn mặt
-        if (faceData == null) {
+        // 1. Không có khuôn mặt trước camera: Ẩn toàn bộ box ô vuông
+        if (faceData == null || faceData.allFaces.isEmpty()) {
             consecutiveAlignedFrames = 0
+            stableFramesMap.clear()
+            lastFaceCenterMap.clear()
             livenessChecker.reset()
             _uiState.update { current ->
                 current.copy(
                     status = RecognitionStatus.IDLE,
                     faceData = null,
+                    detectedFaces = emptyList(),
+                    primaryFaceBox = null,
+                    frameWidth = 0,
+                    frameHeight = 0,
                     alignmentStatus = FaceAlignmentStatus.NO_FACE,
-                    activeGuidance = "Vui lòng nhìn thẳng vào camera",
+                    activeGuidance = "Vui lòng đứng trước camera",
                     confidenceText = "Đang tìm khuôn mặt...",
                     stabilityProgress = 0f
                 )
@@ -334,73 +324,137 @@ class AttendanceViewModel(
             return
         }
 
-        // Kiểm tra chống chấm công lặp liên tục cho cùng một trackingId (chỉ chặn nếu là cùng 1 người)
+        val faces = faceData.allFaces.ifEmpty { listOf(faceData.boundingBox) }
         val now = System.currentTimeMillis()
-        if (faceData.trackingId != null &&
-            faceData.trackingId == lastCheckedTrackingId &&
-            (now - lastCheckedTimestamp) < duplicateCooldownMs
-        ) {
+
+        // Lấy danh sách toàn bộ khuôn mặt đang được theo dõi
+        val trackedFaces = faceData.trackedFaces.ifEmpty {
+            listOf(
+                com.company.attendance.domain.model.FaceTrackItem(
+                    boundingBox = faceData.boundingBox,
+                    trackingId = faceData.trackingId,
+                    headEulerAngleX = faceData.headEulerAngleX,
+                    headEulerAngleY = faceData.headEulerAngleY,
+                    headEulerAngleZ = faceData.headEulerAngleZ
+                )
+            )
+        }
+
+        // 2. Chọn người ưu tiên gửi server (chưa bị cooldown, nhìn thẳng, to nhất)
+        val primaryCandidate = selectPrimaryCandidate(trackedFaces, now)
+        val primaryBox = primaryCandidate?.boundingBox ?: faces.firstOrNull() ?: faceData.boundingBox
+
+        if (primaryCandidate == null) {
+            // Toàn bộ các khuôn mặt đều vừa quét xong và đang trong cooldown
             _uiState.update { current ->
                 current.copy(
                     status = RecognitionStatus.COOLDOWN,
                     faceData = faceData,
-                    alignmentStatus = faceData.alignmentStatus,
-                    activeGuidance = "Bạn vừa hoàn tất chấm công. Vui lòng nhường vị trí cho người tiếp theo.",
-                    confidenceText = "Đã ghi nhận",
+                    detectedFaces = faces,
+                    primaryFaceBox = primaryBox,
+                    frameWidth = faceData.imageWidth,
+                    frameHeight = faceData.imageHeight,
+                    alignmentStatus = FaceAlignmentStatus.ALIGNED,
+                    activeGuidance = "Đã hoàn tất chấm công. Vui lòng nhường chỗ cho người tiếp theo.",
+                    confidenceText = "Đang chờ người tiếp theo...",
                     stabilityProgress = 0f
                 )
             }
             return
         }
 
-        // 2. Có khuôn mặt nhưng chưa đạt chuẩn căn chỉnh (Quá xa, quá gần, lệch, nghiêng đầu, nhiều người)
-        if (faceData.alignmentStatus != FaceAlignmentStatus.ALIGNED) {
-            consecutiveAlignedFrames = 0
+        // 3. Đánh giá độ ổn định và bắt ảnh nét nhất (Best-Shot Selection)
+        val candidateTrackId = primaryCandidate.trackingId ?: primaryCandidate.hashCode()
+
+        // Tính toán độ dịch chuyển tâm khuôn mặt giữa 2 frame liên tiếp (Motion Displacement)
+        val currentCenter = PointF(
+            primaryBox.exactCenterX(),
+            primaryBox.exactCenterY()
+        )
+        val lastCenter = lastFaceCenterMap[candidateTrackId]
+        val displacement = if (lastCenter != null) {
+            kotlin.math.hypot(
+                (currentCenter.x - lastCenter.x).toDouble(),
+                (currentCenter.y - lastCenter.y).toDouble()
+            ).toFloat()
+        } else {
+            0f
+        }
+        lastFaceCenterMap[candidateTrackId] = currentCenter
+
+        // Điều kiện chụp ảnh sắc nét (Best-Shot):
+        // 1. Nhìn thẳng và có đặc trưng khuôn mặt hợp lệ (chống giả lập / ma)
+        // 2. Không di chuyển nhanh khi chụp (độ dịch chuyển tâm <= 12px giữa các frame)
+        // 3. Đứng đủ gần camera (chiều rộng & cao khuôn mặt >= 110px)
+        val isStationary = displacement <= 12f
+        val isSufficientSize = primaryBox.width() >= 110 && primaryBox.height() >= 110
+        val isLookingStraight = primaryCandidate.isLookingStraight && primaryCandidate.hasValidFaceFeatures
+
+        if (isLookingStraight && isStationary && isSufficientSize) {
+            val currentStable = (stableFramesMap[candidateTrackId] ?: 0) + 1
+            stableFramesMap[candidateTrackId] = currentStable
+            val progress = (currentStable.toFloat() / requiredStableFrames).coerceIn(0f, 1f)
+
+            val statusText = if (faces.size > 1) {
+                "Phát hiện ${faces.size} người • Đang quét người chính"
+            } else {
+                "Đã phát hiện khuôn mặt"
+            }
+
+            _uiState.update { current ->
+                current.copy(
+                    status = if (currentStable >= requiredStableFrames) RecognitionStatus.FACE_STABLE else RecognitionStatus.FACE_DETECTED,
+                    faceData = faceData,
+                    detectedFaces = faces,
+                    primaryFaceBox = primaryBox,
+                    frameWidth = faceData.imageWidth,
+                    frameHeight = faceData.imageHeight,
+                    alignmentStatus = FaceAlignmentStatus.ALIGNED,
+                    activeGuidance = if (currentStable >= requiredStableFrames) "Đang chụp và gửi lên AI Server..." else "Giữ yên khuôn mặt để quét...",
+                    confidenceText = statusText,
+                    stabilityProgress = progress
+                )
+            }
+
+            // KHI ĐỦ ĐIỀU KIỆN ỔN ĐỊNH: Tự động chụp và gửi lên Server!
+            if (currentStable >= requiredStableFrames) {
+                stableFramesMap.remove(candidateTrackId)
+                lastFaceCenterMap.remove(candidateTrackId)
+                triggerVerification(faceData, primaryCandidate)
+            }
+        } else {
+            // Người đó đang quay đầu, di chuyển nhanh hoặc quá xa -> reset đếm ổn định để tránh chụp mờ
+            stableFramesMap[candidateTrackId] = 0
+            val guidance = when {
+                !isSufficientSize -> "Vui lòng tiến lại gần camera hơn"
+                !isLookingStraight -> "Vui lòng nhìn thẳng vào camera"
+                else -> "Giữ yên khuôn mặt để chụp nét..."
+            }
             _uiState.update { current ->
                 current.copy(
                     status = RecognitionStatus.ALIGNING,
                     faceData = faceData,
-                    alignmentStatus = faceData.alignmentStatus,
-                    activeGuidance = faceData.guidanceMessage,
-                    confidenceText = when (faceData.alignmentStatus) {
-                        FaceAlignmentStatus.MULTIPLE_FACES -> "Nhiều người"
-                        FaceAlignmentStatus.TOO_FAR -> "Quá xa"
-                        FaceAlignmentStatus.TOO_CLOSE -> "Quá gần"
-                        FaceAlignmentStatus.OFF_CENTER -> "Lệch tâm"
-                        FaceAlignmentStatus.HEAD_TILTED -> "Nghiêng đầu"
-                        else -> "Đang căn chỉnh..."
-                    },
+                    detectedFaces = faces,
+                    primaryFaceBox = primaryBox,
+                    frameWidth = faceData.imageWidth,
+                    frameHeight = faceData.imageHeight,
+                    alignmentStatus = FaceAlignmentStatus.HEAD_TILTED,
+                    activeGuidance = guidance,
+                    confidenceText = if (faces.size > 1) "Phát hiện ${faces.size} người" else "Đang căn chỉnh...",
                     stabilityProgress = 0f
                 )
             }
-            return
-        }
-
-        // 3. Khuôn mặt đã nằm chuẩn trong khung oval (Face Alignment OK)
-        consecutiveAlignedFrames++
-        val progress = (consecutiveAlignedFrames.toFloat() / requiredAlignedFrames).coerceIn(0f, 1f)
-
-        if (consecutiveAlignedFrames < requiredAlignedFrames) {
-            _uiState.update { current ->
-                current.copy(
-                    status = RecognitionStatus.FACE_STABLE,
-                    faceData = faceData,
-                    alignmentStatus = FaceAlignmentStatus.ALIGNED,
-                    activeGuidance = "Khuôn mặt chuẩn. Vui lòng giữ yên...",
-                    confidenceText = "Đang giữ vị trí (${(progress * 100).toInt()}%)",
-                )
-            }
-        } else {
-            // Đã giữ yên ổn định đủ thời gian -> Chuyển sang VERIFYING
-            consecutiveAlignedFrames = 0
-            triggerVerification(faceData)
         }
     }
 
     /**
-     * Tiến hành bước VERIFYING: Chấm công bằng nhận diện khuôn mặt qua FaceCheck AI Service.
+     * Tiến hành bước VERIFYING: Chụp và gửi ảnh khuôn mặt lên AI Server để nhận diện.
      */
-    private fun triggerVerification(faceData: FaceDetectionData) {
+    private fun triggerVerification(
+        faceData: FaceDetectionData,
+        targetFace: com.company.attendance.domain.model.FaceTrackItem? = null
+    ) {
+        val targetTrackingId = targetFace?.trackingId ?: faceData.trackingId
         verificationJob?.cancel()
         verificationJob = viewModelScope.launch {
             _uiState.update { current ->
@@ -413,18 +467,66 @@ class AttendanceViewModel(
                 )
             }
 
-            // Ghi nhận trackingId để chống lặp
-            faceData.trackingId?.let {
+            // Ghi nhận cooldown cho người này để không bị quét lặp lại liên tục
+            targetTrackingId?.let {
                 lastCheckedTrackingId = it
                 lastCheckedTimestamp = System.currentTimeMillis()
+                completedTrackingIds[it] = System.currentTimeMillis()
             }
 
             if (_uiState.value.isRealMode) {
                 val bitmap = bitmapProvider?.invoke()
+
                 if (bitmap != null) {
-                    val base64 = bitmap.toBase64Jpeg(quality = 80, maxDimension = 720, recycleSource = true)
-                    logI("Gửi ảnh khuôn mặt chấm công lên FaceCheck AI Backend...")
-                    val result = attendanceRepository.checkIn(imageBase64 = base64)
+                    // 1. Xác thực khuôn mặt thực tế trên Bitmap chụp (ngăn chặn triệt để chụp tường trống / phantom face)
+                    val exactBox = faceEmbedder.detectFaceBoundingBox(bitmap)
+                    if (exactBox == null) {
+                        logE("[ATTENDANCE] Bitmap chụp không phát hiện khuôn mặt thực sự -> Bỏ qua tránh phantom check-in")
+                        _uiState.update { current ->
+                            current.copy(
+                                status = RecognitionStatus.IDLE,
+                                activeGuidance = "Vui lòng nhìn thẳng vào camera",
+                                confidenceText = "Đang tìm khuôn mặt...",
+                                stabilityProgress = 0f
+                            )
+                        }
+                        return@launch
+                    }
+
+                    // [DEBUG_CAPTURE_TEST] Giữ lại bitmap để hiển thị trực tiếp lên UI test độ nét
+                    _uiState.update { it.copy(capturedBitmap = bitmap) }
+
+                    val croppedFace = faceEmbedder.cropFace(bitmap, exactBox, marginRatio = 0.22f) ?: bitmap
+
+                    // 2. Trích xuất vector 512D On-Device bằng TFLite
+                    val faceVector = faceEmbedder.extractEmbeddingFromCroppedFace(croppedFace)
+                    if (faceVector == null) {
+                        logE("[ATTENDANCE] Không thể trích xuất vector khuôn mặt On-Device")
+                        if (croppedFace != bitmap) croppedFace.recycle()
+                        _uiState.update { current ->
+                            current.copy(
+                                status = RecognitionStatus.FAILURE,
+                                failureReason = "Không thể trích xuất đặc trưng khuôn mặt.",
+                                confidenceText = "Lỗi xử lý khuôn mặt",
+                                autoDismissRemainingSeconds = 2
+                            )
+                        }
+                        _uiEffect.emit(AttendanceUiEffect.PlayErrorSound)
+                        startAutoDismissCountdown()
+                        return@launch
+                    }
+
+                    // 3. Tạo ảnh thumbnail đại diện nhẹ để lưu vết log
+                    val thumbnailBase64 = faceEmbedder.createThumbnailBase64FromCroppedFace(croppedFace, targetSize = 240)
+                    if (croppedFace != bitmap) {
+                        croppedFace.recycle()
+                    }
+
+                    logI("[FACE_CHECKIN] Gửi vector 512D On-Device (dim=${faceVector.size}) lên FaceCheck AI Backend...")
+                    val result = attendanceRepository.checkIn(
+                        faceVector = faceVector.toList(),
+                        imageBase64 = thumbnailBase64
+                    )
                     when (result) {
                         is Result.Success -> {
                             val record = result.data
@@ -569,8 +671,6 @@ class AttendanceViewModel(
             }
         }
     }
-
-
     private fun startAutoDismissCountdown(seconds: Int = 2) {
         autoDismissJob?.cancel()
         autoDismissJob = viewModelScope.launch {
@@ -586,6 +686,8 @@ class AttendanceViewModel(
         autoDismissJob?.cancel()
         verificationJob?.cancel()
         consecutiveAlignedFrames = 0
+        stableFramesMap.clear()
+        lastFaceCenterMap.clear()
         livenessChecker.reset()
         _uiState.update { current ->
             current.copy(
@@ -606,5 +708,8 @@ class AttendanceViewModel(
         clockJob?.cancel()
         autoDismissJob?.cancel()
         verificationJob?.cancel()
+        faceEmbedder.close()
     }
 }
+
+

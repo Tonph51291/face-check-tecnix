@@ -7,8 +7,11 @@ import com.google.gson.annotations.SerializedName
  * POST /attendance/check-in
  */
 data class AttendanceCheckInRequestDto(
+    @SerializedName("face_vector")
+    val faceVector: List<Float>? = null,
+
     @SerializedName("capturedImageBase64")
-    val capturedImageBase64: String,
+    val capturedImageBase64: String? = null,
 
     @SerializedName("image_base64")
     val imageBase64: String? = null,

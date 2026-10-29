@@ -14,7 +14,18 @@ interface EmployeeRepository {
     suspend fun getEmployeeById(id: String): Result<Employee>
     suspend fun getEmployeeDetail(id: String, forceRefresh: Boolean = false): Result<com.company.attendance.domain.model.EmployeeDetail>
     suspend fun updateFaceEnrollmentStatus(employeeId: String, hasFaceSample: Boolean): Result<Employee>
-    suspend fun enrollFaceSample(employeeId: String, imageBase64: String, sampleIndex: Int? = null): Result<EnrollFaceDataDto>
+    suspend fun enrollFaceBatch(
+        employeeId: String,
+        vectors: List<List<Float>>,
+        faceImageBase64: String? = null
+    ): Result<EnrollFaceDataDto>
+    suspend fun enrollFaceSample(
+        employeeId: String,
+        sampleIndex: Int,
+        faceVector: List<Float>,
+        faceImageBase64: String? = null
+    ): Result<EnrollFaceDataDto>
     suspend fun deleteFaceSamples(employeeId: String): Result<Boolean>
+    fun clearDetailCache(employeeId: String? = null)
 }
 

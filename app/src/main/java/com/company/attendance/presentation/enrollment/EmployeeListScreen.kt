@@ -38,11 +38,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -51,7 +48,6 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import com.company.attendance.domain.model.Employee
-import com.company.attendance.presentation.enrollment.components.DepartmentFilterChips
 import com.company.attendance.presentation.enrollment.components.EmployeeListItemCard
 import com.company.attendance.presentation.enrollment.components.EnrollmentTopBar
 import com.company.attendance.presentation.enrollment.components.SearchInputBox
@@ -66,7 +62,7 @@ import com.company.attendance.presentation.enrollment.theme.EnrollmentColors
 @Composable
 fun EmployeeSearchScreen(
     onNavigateBack: () -> Unit,
-    onEmployeeSelected: (String) -> Unit = {},
+    onEmployeeSelected: (Employee) -> Unit = {},
     shouldRefresh: Boolean = false,
     onRefreshConsumed: () -> Unit = {},
     viewModel: EnrollmentViewModel = viewModel(),
@@ -106,7 +102,7 @@ fun EmployeeSearchContent(
     pagingEmployees: LazyPagingItems<Employee>,
     onEvent: (EnrollmentUiEvent) -> Unit,
     onNavigateBack: () -> Unit,
-    onEmployeeSelected: (String) -> Unit,
+    onEmployeeSelected: (Employee) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val refreshLoadState = pagingEmployees.loadState.refresh
@@ -154,49 +150,14 @@ fun EmployeeSearchContent(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            // Badge quy trình
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Badge,
-                                    contentDescription = null,
-                                    tint = EnrollmentColors.Primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "QUY TRÌNH ĐĂNG KÝ SINH TRẮC HỌC",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EnrollmentColors.PrimaryDark,
-                                    letterSpacing = 0.8.sp
-                                )
-                            }
-
-                            // Tiêu đề & diễn giải
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    text = "Danh sách nhân sự",
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = EnrollmentColors.OnSurface,
-                                    letterSpacing = (-0.4).sp
-                                )
-
-                                Text(
-                                    text = buildAnnotatedString {
-                                        append("Dữ liệu đồng bộ trực tiếp từ AI Backend Service ")
-                                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = EnrollmentColors.OnSurfaceSecondary)) {
-                                            append("(SFace + YuNet)")
-                                        }
-                                        append(". Tìm kiếm nhân sự để đăng ký hoặc cập nhật khuôn mặt mới.")
-                                    },
-                                    fontSize = 12.5.sp,
-                                    color = EnrollmentColors.OnSurfaceVariant,
-                                    lineHeight = 18.sp
-                                )
-                            }
+                            Text(
+                                text = "Danh sách nhân sự",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = EnrollmentColors.OnSurface,
+                                letterSpacing = (-0.4).sp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
 
                             // Ô tìm kiếm thời gian thực
                             SearchInputBox(
@@ -204,12 +165,7 @@ fun EmployeeSearchContent(
                                 onQueryChange = { onEvent(EnrollmentUiEvent.OnSearchQueryChanged(it)) }
                             )
 
-                            // Thanh chip lọc danh mục phòng ban
-                            DepartmentFilterChips(
-                                departments = uiState.departments,
-                                selectedDepartment = uiState.selectedDepartment,
-                                onDepartmentSelected = { onEvent(EnrollmentUiEvent.OnSelectDepartment(it)) }
-                            )
+
 
                             // Banner cảnh báo lỗi nếu có
                             if (errorMessage != null) {
@@ -290,14 +246,6 @@ fun EmployeeSearchContent(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    if (uiState.selectedDepartment != "Tất cả") {
-                                        Text(
-                                            text = "Lọc: ${uiState.selectedDepartment}",
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = EnrollmentColors.PrimaryDark
-                                        )
-                                    }
 
                                     // Nút đồng bộ danh sách chuẩn Stitch
                                     IconButton(
@@ -408,7 +356,7 @@ fun EmployeeSearchContent(
                                     EmployeeListItemCard(
                                         employee = employee,
                                         onClick = {
-                                            onEmployeeSelected(employee.id.ifBlank { employee.code })
+                                            onEmployeeSelected(employee)
                                         },
                                         modifier = Modifier.fillMaxWidth()
                                     )
@@ -435,11 +383,7 @@ fun EmployeeSearchContent(
                         }
                     }
 
-                    // 4. KHỐI TRỢ GIÚP DÀNH CHO NHÂN VIÊN CHƯA CÓ HỒ SƠ
-                    item(key = "help_support_card") {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        SupportHelpCard()
-                    }
+
                 }
             }
         }
