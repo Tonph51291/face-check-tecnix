@@ -174,11 +174,14 @@ fun AttendanceScreen(
                             modifier = Modifier.fillMaxSize(),
                             isFrontCamera = uiState.isFrontCamera,
                             onFaceDetected = { faceData ->
-                                // Cập nhật ngay lập tức lên UI local state để khung ngắm bám sát 100% thời gian thực không độ trễ
-                                fastDetectedFaces = faceData?.allFaces ?: emptyList()
-                                fastFrameWidth = faceData?.imageWidth ?: 0
-                                fastFrameHeight = faceData?.imageHeight ?: 0
-                                fastPrimaryBox = faceData?.boundingBox
+                                val incomingFaces = faceData?.allFaces ?: emptyList()
+                                // Chỉ kích hoạt cập nhật State cục bộ khi danh sách mặt thay đổi để chống Recomposition bão
+                                if (fastDetectedFaces.isNotEmpty() || incomingFaces.isNotEmpty()) {
+                                    fastDetectedFaces = incomingFaces
+                                    fastFrameWidth = faceData?.imageWidth ?: 0
+                                    fastFrameHeight = faceData?.imageHeight ?: 0
+                                    fastPrimaryBox = faceData?.boundingBox
+                                }
                                 viewModel.onEvent(AttendanceUiEvent.OnFaceFrameAnalyzed(faceData))
                             },
                             onCaptureReady = { provider ->
@@ -192,14 +195,15 @@ fun AttendanceScreen(
                             }
                         )
 
-                        // Lớp phủ vẽ góc ngắm khuôn mặt thời gian thực (bám sát khuôn mặt không độ trễ)
+                        // Lớp phủ vẽ góc ngắm và thẻ tên AR đa mục tiêu (Multi-Face Walk-Through)
                         FaceDetectionOverlay(
                             faces = fastDetectedFaces,
                             imageWidth = fastFrameWidth,
                             imageHeight = fastFrameHeight,
                             primaryFaceBox = fastPrimaryBox,
                             isFrontCamera = uiState.isFrontCamera,
-                            isMultipleFaces = fastDetectedFaces.size > 1
+                            isMultipleFaces = fastDetectedFaces.size > 1,
+                            trackedFaces = uiState.activeTrackedFaces
                         )
 
                         // Thẻ thông báo kết quả & trạng thái gắn đáy không che camera (Non-blocking Bottom Dock)

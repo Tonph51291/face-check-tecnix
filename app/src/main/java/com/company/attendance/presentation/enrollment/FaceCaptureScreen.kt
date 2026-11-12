@@ -71,7 +71,8 @@ fun FaceCaptureScreen(
     onNavigateBack: () -> Unit,
     onCaptureFace: (Bitmap?, FaceQualityMetrics, String?) -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: FaceCaptureViewModel = viewModel(key = "FaceCapture_${employee.id.ifBlank { employee.code }}")
+    // Tối ưu hóa: Dùng chung một ViewModel instance để tránh rò rỉ RAM (leak 24MB FaceEmbedder model cho mỗi nhân viên)
+    viewModel: FaceCaptureViewModel = viewModel(key = "FaceCaptureSession")
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 

@@ -437,6 +437,9 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                 // 3. Trích xuất Vector 512D bằng TFLite FaceNet từ đúng vùng khuôn mặt
                 val faceVector = faceEmbedder.extractEmbeddingFromCroppedFace(croppedFace)
                 if (faceVector == null) {
+                    if (croppedFace != bitmap && !bitmap.isRecycled) {
+                        try { bitmap.recycle() } catch (_: Exception) {}
+                    }
                     _uiState.update {
                         it.copy(
                             isUploading = false,
@@ -448,6 +451,11 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                 }
 
                 val qualityMetrics = BitmapQualityAnalyzer.analyze(bitmap, faceData)
+
+                // Thu hồi ngay Bitmap full màn hình (8MB) sau khi đã trích xuất & phân tích chất lượng
+                if (croppedFace != bitmap && !bitmap.isRecycled) {
+                    try { bitmap.recycle() } catch (_: Exception) {}
+                }
 
                 when (currentStep) {
                     1 -> {

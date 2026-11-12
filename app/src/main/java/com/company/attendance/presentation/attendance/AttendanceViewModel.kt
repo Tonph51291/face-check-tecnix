@@ -19,7 +19,9 @@ import com.company.attendance.domain.model.FaceDetectionData
 import com.company.attendance.domain.repository.AttendanceRepository
 import com.company.attendance.domain.usecase.RecognizeFaceUseCase
 import com.company.attendance.domain.usecase.SubmitAttendanceUseCase
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,7 +77,8 @@ class AttendanceViewModel @JvmOverloads constructor(
     private val completedTrackingIds = mutableMapOf<Int, Long>()
     private val stableFramesMap = mutableMapOf<Int, Int>()
     private val faceCooldownDurationMs = 10000L
-    private val requiredStableFrames = 4 // ~130ms giữ ổn định để chụp ảnh siêu tốc và sắc nét
+    // Phương án 1 (Instant Snap): Chỉ cần 1 frame nhìn thẳng là kích hoạt phân tích & gửi server ngay lập tức
+    private val requiredStableFrames = 1
 
     // Best-Shot Selection: Theo dõi độ dịch chuyển tâm mặt (motion displacement)
     // Nếu người dùng đang bước đi quá nhanh (displacement > 18px), reset đếm ổn định để tránh chụp ảnh mờ
@@ -313,6 +316,14 @@ class AttendanceViewModel @JvmOverloads constructor(
             lastFaceCenterMap.clear()
             livenessChecker.reset()
             _uiState.update { current ->
+                if (current.status == RecognitionStatus.IDLE &&
+                    current.faceData == null &&
+                    current.detectedFaces.isEmpty() &&
+                    current.primaryFaceBox == null &&
+                    current.stabilityProgress == 0f
+                ) {
+                    return@update current
+                }
                 current.copy(
                     status = RecognitionStatus.IDLE,
                     faceData = null,
@@ -387,12 +398,12 @@ class AttendanceViewModel @JvmOverloads constructor(
         }
         lastFaceCenterMap[candidateTrackId] = currentCenter
 
-        // Điều kiện chụp ảnh sắc nét (Best-Shot):
+        // Điều kiện chụp ảnh siêu tốc (Instant Snap):
         // 1. Nhìn thẳng và có đặc trưng khuôn mặt hợp lệ (chống giả lập / ma)
-        // 2. Không di chuyển nhanh khi chụp (độ dịch chuyển tâm <= 12px giữa các frame)
+        // 2. Dung sai di chuyển nới lỏng lên 35px (người dùng vừa bước tới vẫn bắt được ngay, không bị reset oan)
         // 3. Đứng trong khoảng cách hợp lý (chiều rộng & cao khuôn mặt >= 70px, hỗ trợ bắt xa tới 2m)
-        // 4. Mắt đang mở (chống chụp lúc chớp mắt)
-        val isStationary = displacement <= 12f
+        // 4. Mắt đang mở
+        val isStationary = displacement <= 35f
         val isSufficientSize = primaryBox.width() >= 70 && primaryBox.height() >= 70
         val isEyesOpen = primaryCandidate.areEyesOpen
         val isLookingStraight = primaryCandidate.isLookingStraight && primaryCandidate.hasValidFaceFeatures
@@ -517,11 +528,20 @@ class AttendanceViewModel @JvmOverloads constructor(
                     // [DEBUG_CAPTURE_TEST] Giữ lại croppedFace gọn nhẹ (~50KB) để hiển thị lên UI kết quả thay vì giữ cả ảnh 8MB
                     _uiState.update { it.copy(capturedBitmap = croppedFace) }
 
-                    // 4. Trích xuất vector 512D On-Device bằng TFLite (kèm xoay thẳng mặt theo góc nghiêng Euler Z)
-                    val faceVector = faceEmbedder.extractEmbeddingFromCroppedFace(
-                        croppedFace = croppedFace,
-                        rotationAngleZ = eulerAngleZ
-                    )
+                    // 4 & 5. Tối ưu song song: Chạy trích xuất vector 512D và tạo Thumbnail đồng thời trên 2 luồng
+                    val faceVectorDeferred = async(Dispatchers.Default) {
+                        faceEmbedder.extractEmbeddingFromCroppedFace(
+                            croppedFace = croppedFace,
+                            rotationAngleZ = eulerAngleZ
+                        )
+                    }
+                    val thumbnailDeferred = async(Dispatchers.Default) {
+                        faceEmbedder.createThumbnailBase64FromCroppedFace(croppedFace, targetSize = 160, quality = 75)
+                    }
+
+                    val faceVector = faceVectorDeferred.await()
+                    val thumbnailBase64 = thumbnailDeferred.await()
+
                     if (faceVector == null) {
                         logE("[ATTENDANCE] Không thể trích xuất vector khuôn mặt On-Device")
                         _uiState.update { current ->
@@ -536,9 +556,6 @@ class AttendanceViewModel @JvmOverloads constructor(
                         startAutoDismissCountdown()
                         return@launch
                     }
-
-                    // 5. Tạo ảnh thumbnail đại diện nhẹ (160px @ 75%) để giảm 60% payload upload mạng
-                    val thumbnailBase64 = faceEmbedder.createThumbnailBase64FromCroppedFace(croppedFace, targetSize = 160, quality = 75)
 
                     logI("[FACE_CHECKIN] Gửi vector 512D On-Device (dim=${faceVector.size}) lên FaceCheck AI Backend...")
                     val result = attendanceRepository.checkIn(

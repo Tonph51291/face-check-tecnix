@@ -63,18 +63,19 @@ class FaceEmbedder(private val context: Context) {
 
             var createdInterpreter: Interpreter? = null
             try {
-                val nnapiOptions = Interpreter.Options().apply {
-                    setNumThreads(4)
-                    setUseNNAPI(true)
-                }
-                createdInterpreter = Interpreter(modelBuffer, nnapiOptions)
-                logI("Đã nạp FaceNet TFLite (512D) với hỗ trợ NNAPI tăng tốc phần cứng NPU")
-            } catch (e: Exception) {
-                logW("NNAPI không khả dụng trên thiết bị này, dùng CPU 4 threads fallback: ${e.message}")
+                // Tối ưu hóa nhiệt: Giới hạn 2 threads CPU để tránh đẩy 4 nhân lên 100% gây Thermal Throttling
                 val cpuOptions = Interpreter.Options().apply {
-                    setNumThreads(4)
+                    setNumThreads(2)
+                    setUseNNAPI(false)
                 }
                 createdInterpreter = Interpreter(modelBuffer, cpuOptions)
+                logI("Đã nạp FaceNet TFLite (512D) tối ưu 2 threads CPU")
+            } catch (e: Exception) {
+                logW("Không thể khởi tạo TFLite với cấu hình 2 threads: ${e.message}")
+                val fallbackOptions = Interpreter.Options().apply {
+                    setNumThreads(2)
+                }
+                createdInterpreter = Interpreter(modelBuffer, fallbackOptions)
             }
             interpreter = createdInterpreter
         } catch (e: Exception) {

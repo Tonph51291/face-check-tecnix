@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.company.attendance.data.ml.CameraFaceAnalyzer
 import android.graphics.Bitmap
+import android.util.Size
 import com.company.attendance.domain.model.FaceDetectionData
 
 /**
@@ -61,7 +62,8 @@ fun CameraPreview(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     scaleType = PreviewView.ScaleType.FILL_CENTER
-                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                    // Tối ưu hóa GPU: Chuyển sang PERFORMANCE (SurfaceView) để camera stream đi trực tiếp qua Hardware Overlay (HWC), triệt tiêu hoàn toàn GPU composition của TextureView
+                    implementationMode = PreviewView.ImplementationMode.PERFORMANCE
                 }
 
                 onCaptureReady?.invoke {
@@ -113,6 +115,7 @@ fun CameraPreview(
                         val imageAnalysis = ImageAnalysis.Builder()
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                            .setTargetResolution(Size(640, 480))
                             .build()
                             .also {
                                 it.setAnalyzer(backgroundExecutor, analyzer)

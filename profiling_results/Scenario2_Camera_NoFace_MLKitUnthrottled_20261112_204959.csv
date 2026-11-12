@@ -1,0 +1,5 @@
+Timestamp,ElapsedSec,CPU_App_Percent,RAM_PSS_MB,RAM_JavaHeap_MB,RAM_NativeHeap_MB,RAM_Gfx_MB,ThreadCount,GC_Count
+20:50:04,0,24.0,138.8,13.6,17.9,0,29,0
+20:50:10,6,50.0,173.7,13.4,37.5,0,37,0
+20:50:14,10,48.0,171.4,15,33.6,0,37,0
+20:50:18,14,44.0,171.7,14.9,33.7,0,37,0

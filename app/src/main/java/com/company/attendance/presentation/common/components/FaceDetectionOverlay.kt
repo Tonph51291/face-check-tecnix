@@ -12,19 +12,17 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.company.attendance.presentation.attendance.TrackFaceStatus
+import com.company.attendance.presentation.attendance.TrackedFaceUiModel
 
 /**
- * Lớp phủ vẽ khung ô vuông 4 góc công nghệ cao (Corner HUD Brackets ┌ ┐ └ ┘) bám sát khuôn mặt.
- * - Chỉ hiển thị khi có khuôn mặt trong khung hình.
- * - Hỗ trợ nhiều người cùng lúc: Phân biệt người đang quét chính (Primary) và người đang chờ.
- * - Xử lý chuẩn xác tỉ lệ phóng to FILL_CENTER của PreviewView và lật gương cho Camera trước.
+ * Lớp phủ vẽ khung ô vuông 4 góc công nghệ cao (Corner HUD Brackets ┌ ┐ └ ┘) và thẻ tên AR bay theo từng người.
+ * Hỗ trợ nhận diện đa mục tiêu Walk-Through đồng thời nhiều người trong cùng 1 khung hình.
  */
 @Composable
 fun FaceDetectionOverlay(
@@ -34,10 +32,22 @@ fun FaceDetectionOverlay(
     primaryFaceBox: Rect? = null,
     isFrontCamera: Boolean = false,
     isMultipleFaces: Boolean = false,
+    trackedFaces: List<TrackedFaceUiModel> = emptyList(),
     modifier: Modifier = Modifier
 ) {
-    // Chỉ hiển thị khung khi có khuôn mặt trong khung hình
-    if (faces.isEmpty() || imageWidth <= 0 || imageHeight <= 0) {
+    val itemsToDraw = if (trackedFaces.isNotEmpty()) {
+        trackedFaces
+    } else {
+        faces.map { rect ->
+            TrackedFaceUiModel(
+                trackingId = rect.hashCode(),
+                boundingBox = rect,
+                status = TrackFaceStatus.DETECTED
+            )
+        }
+    }
+
+    if (itemsToDraw.isEmpty() || imageWidth <= 0 || imageHeight <= 0) {
         return
     }
 
@@ -45,30 +55,51 @@ fun FaceDetectionOverlay(
     val bracketStrokeWidth = with(density) { 3.dp.toPx() }
     val bracketLength = with(density) { 24.dp.toPx() }
 
-    // Lưu tọa độ frame trước để áp dụng LERP làm mượt 60 FPS
-    val animBounds = remember { FloatArray(4) { -1f } }
+    // Text Paint tái sử dụng để vẽ thẻ tên AR mà không sinh rác trên Heap
+    val textPaint = remember(density) {
+        Paint().apply {
+            color = android.graphics.Color.WHITE
+            textSize = with(density) { 13.sp.toPx() }
+            isAntiAlias = true
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+    }
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val canvasWidth = size.width
         val canvasHeight = size.height
 
-        // 1. Tính toán tỉ lệ Scale theo ScaleType.FILL_CENTER
         val scale = maxOf(canvasWidth / imageWidth.toFloat(), canvasHeight / imageHeight.toFloat())
         val scaledWidth = imageWidth * scale
         val scaledHeight = imageHeight * scale
         val offsetX = (canvasWidth - scaledWidth) / 2f
         val offsetY = (canvasHeight - scaledHeight) / 2f
 
-        faces.forEachIndexed { index, faceRect ->
-            // Xác định xem khuôn mặt này có phải là người đang được ưu tiên quét hay không
-            val isPrimary = (primaryFaceBox == null && index == 0) || (primaryFaceBox != null && primaryFaceBox == faceRect)
+        itemsToDraw.forEach { item ->
+            val faceRect = item.boundingBox
 
-            // Màu sắc theo trạng thái:
-            // Người chính: Xanh Neon / Emerald nổi bật
-            // Người phụ / đang chờ: Màu Vàng Hổ Phách
-            val themeColor = if (isPrimary) Color(0xFF00E676) else Color(0xFFFBBF24)
+            // Màu sắc và thẻ tên theo trạng thái của từng người
+            val (themeColor, badgeText, badgeBgColor) = when (item.status) {
+                TrackFaceStatus.SUCCESS, TrackFaceStatus.COOLDOWN -> {
+                    val name = if (!item.employeeName.isNullOrBlank()) "✓ ${item.employeeName}" else "✓ Chấm công thành công"
+                    Triple(Color(0xFF10B981), name, Color(0xEE065F46))
+                }
+                TrackFaceStatus.VERIFYING -> {
+                    Triple(Color(0xFF00E5FF), "Đang nhận diện...", Color(0xEE0E7490))
+                }
+                TrackFaceStatus.DUPLICATE -> {
+                    Triple(Color(0xFFF59E0B), "✓ Đã ghi nhận", Color(0xEEB45309))
+                }
+                TrackFaceStatus.FAILURE -> {
+                    val msg = item.message ?: "Chưa nhận diện"
+                    Triple(Color(0xFFEF4444), msg, Color(0xEE991B1B))
+                }
+                TrackFaceStatus.DETECTED, TrackFaceStatus.SEARCHING -> {
+                    Triple(Color(0xFFF8FAFC), null, Color.Transparent)
+                }
+            }
 
-            // 2. Chuyển đổi tọa độ khuôn mặt sang hệ quy chiếu màn hình Compose
+            // Chuyển đổi tọa độ khuôn mặt sang màn hình
             val rawLeft = if (isFrontCamera) {
                 canvasWidth - (faceRect.right * scale + offsetX)
             } else {
@@ -83,95 +114,76 @@ fun FaceDetectionOverlay(
 
             val targetTop = faceRect.top * scale + offsetY
             val targetBottom = faceRect.bottom * scale + offsetY
-            val targetLeft = minOf(rawLeft, rawRight)
-            val targetRight = maxOf(rawLeft, rawRight)
+            val renderLeft = minOf(rawLeft, rawRight)
+            val renderRight = maxOf(rawLeft, rawRight)
 
-            // 3. Thuật toán LERP (Linear Interpolation) làm mượt 60 FPS bám sát chuyển động mặt
-            val renderLeft: Float
-            val renderTop: Float
-            val renderRight: Float
-            val renderBottom: Float
-
-            if (isPrimary) {
-                val prevLeft = animBounds[0]
-                val prevTop = animBounds[1]
-                val prevRight = animBounds[2]
-                val prevBottom = animBounds[3]
-
-                if (prevLeft < 0f || kotlin.math.abs(targetLeft - prevLeft) > 200f) {
-                    renderLeft = targetLeft
-                    renderTop = targetTop
-                    renderRight = targetRight
-                    renderBottom = targetBottom
-                } else {
-                    renderLeft = prevLeft + (targetLeft - prevLeft) * 0.70f
-                    renderTop = prevTop + (targetTop - prevTop) * 0.70f
-                    renderRight = prevRight + (targetRight - prevRight) * 0.70f
-                    renderBottom = prevBottom + (targetBottom - prevBottom) * 0.70f
-                }
-                animBounds[0] = renderLeft
-                animBounds[1] = renderTop
-                animBounds[2] = renderRight
-                animBounds[3] = renderBottom
-            } else {
-                renderLeft = targetLeft
-                renderTop = targetTop
-                renderRight = targetRight
-                renderBottom = targetBottom
+            if (renderRight <= 0f || renderLeft >= canvasWidth || targetBottom <= 0f || targetTop >= canvasHeight) {
+                return@forEach
             }
 
-            // Kiểm tra biên an toàn: Nếu khuôn mặt nằm hoàn toàn ngoài màn hình thì bỏ qua
-            if (renderRight <= 0f || renderLeft >= canvasWidth || renderBottom <= 0f || renderTop >= canvasHeight) {
-                return@forEachIndexed
-            }
-
-            // Kẹp tọa độ hiển thị vào bên trong màn hình để 4 góc không bao giờ bị cắt cụt (Glitch mất góc)
             val safePadding = 10f
             val drawLeft = renderLeft.coerceIn(safePadding, canvasWidth - safePadding)
-            val drawTop = renderTop.coerceIn(safePadding, canvasHeight - safePadding)
+            val drawTop = targetTop.coerceIn(safePadding, canvasHeight - safePadding)
             val drawRight = renderRight.coerceIn(safePadding, canvasWidth - safePadding)
-            val drawBottom = renderBottom.coerceIn(safePadding, canvasHeight - safePadding)
+            val drawBottom = targetBottom.coerceIn(safePadding, canvasHeight - safePadding)
 
             val boxWidth = drawRight - drawLeft
             val boxHeight = drawBottom - drawTop
+            if (boxWidth < 30f || boxHeight < 30f) return@forEach
 
-            if (boxWidth < 30f || boxHeight < 30f) return@forEachIndexed
-
-            // Vẽ 4 góc ngắm tinh tế (Sleek Corner Reticle ┌ ┐ └ ┘) không che mặt người dùng
+            // 1. Vẽ 4 góc ngắm Sleek Corner Reticle ┌ ┐ └ ┘
             val actualBracketLen = minOf(bracketLength, boxWidth * 0.25f, boxHeight * 0.25f)
-            val bracketStroke = Stroke(width = bracketStrokeWidth, cap = StrokeCap.Round)
 
             // Góc trên - trái: ┌
-            val pathTL = Path().apply {
-                moveTo(drawLeft, drawTop + actualBracketLen)
-                lineTo(drawLeft, drawTop)
-                lineTo(drawLeft + actualBracketLen, drawTop)
-            }
-            drawPath(pathTL, color = themeColor, style = bracketStroke)
+            drawLine(color = themeColor, start = Offset(drawLeft, drawTop + actualBracketLen), end = Offset(drawLeft, drawTop), strokeWidth = bracketStrokeWidth, cap = StrokeCap.Round)
+            drawLine(color = themeColor, start = Offset(drawLeft, drawTop), end = Offset(drawLeft + actualBracketLen, drawTop), strokeWidth = bracketStrokeWidth, cap = StrokeCap.Round)
 
             // Góc trên - phải: ┐
-            val pathTR = Path().apply {
-                moveTo(drawRight - actualBracketLen, drawTop)
-                lineTo(drawRight, drawTop)
-                lineTo(drawRight, drawTop + actualBracketLen)
-            }
-            drawPath(pathTR, color = themeColor, style = bracketStroke)
+            drawLine(color = themeColor, start = Offset(drawRight - actualBracketLen, drawTop), end = Offset(drawRight, drawTop), strokeWidth = bracketStrokeWidth, cap = StrokeCap.Round)
+            drawLine(color = themeColor, start = Offset(drawRight, drawTop), end = Offset(drawRight, drawTop + actualBracketLen), strokeWidth = bracketStrokeWidth, cap = StrokeCap.Round)
 
             // Góc dưới - trái: └
-            val pathBL = Path().apply {
-                moveTo(drawLeft, drawBottom - actualBracketLen)
-                lineTo(drawLeft, drawBottom)
-                lineTo(drawLeft + actualBracketLen, drawBottom)
-            }
-            drawPath(pathBL, color = themeColor, style = bracketStroke)
+            drawLine(color = themeColor, start = Offset(drawLeft, drawBottom - actualBracketLen), end = Offset(drawLeft, drawBottom), strokeWidth = bracketStrokeWidth, cap = StrokeCap.Round)
+            drawLine(color = themeColor, start = Offset(drawLeft, drawBottom), end = Offset(drawLeft + actualBracketLen, drawBottom), strokeWidth = bracketStrokeWidth, cap = StrokeCap.Round)
 
             // Góc dưới - phải: ┘
-            val pathBR = Path().apply {
-                moveTo(drawRight - actualBracketLen, drawBottom)
-                lineTo(drawRight, drawBottom)
-                lineTo(drawRight, drawBottom - actualBracketLen)
+            drawLine(color = themeColor, start = Offset(drawRight - actualBracketLen, drawBottom), end = Offset(drawRight, drawBottom), strokeWidth = bracketStrokeWidth, cap = StrokeCap.Round)
+            drawLine(color = themeColor, start = Offset(drawRight, drawBottom), end = Offset(drawRight, drawBottom - actualBracketLen), strokeWidth = bracketStrokeWidth, cap = StrokeCap.Round)
+
+            // 2. Vẽ thẻ tên AR bay trên đầu (Floating Name Tag Badge)
+            if (badgeText != null) {
+                val textWidth = textPaint.measureText(badgeText)
+                val pillPaddingX = 24f
+                val pillHeight = 44f
+                val pillWidth = textWidth + (pillPaddingX * 2)
+                val pillLeft = (drawLeft + (boxWidth - pillWidth) / 2f).coerceIn(12f, canvasWidth - pillWidth - 12f)
+                val pillTop = (drawTop - pillHeight - 14f).coerceAtLeast(12f)
+
+                // Nền thẻ bo tròn
+                drawRoundRect(
+                    color = badgeBgColor,
+                    topLeft = Offset(pillLeft, pillTop),
+                    size = Size(pillWidth, pillHeight),
+                    cornerRadius = CornerRadius(14f, 14f)
+                )
+
+                // Viền mỏng xung quanh thẻ
+                drawRoundRect(
+                    color = themeColor.copy(alpha = 0.8f),
+                    topLeft = Offset(pillLeft, pillTop),
+                    size = Size(pillWidth, pillHeight),
+                    cornerRadius = CornerRadius(14f, 14f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                )
+
+                // Chữ tên nhân viên
+                drawContext.canvas.nativeCanvas.drawText(
+                    badgeText,
+                    pillLeft + pillPaddingX,
+                    pillTop + pillHeight * 0.68f,
+                    textPaint
+                )
             }
-            drawPath(pathBR, color = themeColor, style = bracketStroke)
         }
     }
 }

@@ -4,6 +4,33 @@ import com.company.attendance.domain.model.FaceAlignmentStatus
 import com.company.attendance.domain.model.FaceDetectionData
 
 /**
+ * Trạng thái của từng khuôn mặt độc lập trong luồng quét đa mục tiêu Walk-Through
+ */
+enum class TrackFaceStatus {
+    SEARCHING,
+    DETECTED,
+    VERIFYING,
+    SUCCESS,
+    DUPLICATE,
+    FAILURE,
+    COOLDOWN
+}
+
+/**
+ * Model hiển thị cho từng khuôn mặt trong khung hình (Multi-Face AR Overlay)
+ */
+data class TrackedFaceUiModel(
+    val trackingId: Int,
+    val boundingBox: android.graphics.Rect,
+    val status: TrackFaceStatus = TrackFaceStatus.DETECTED,
+    val employeeName: String? = null,
+    val employeeCode: String? = null,
+    val checkInTime: String? = null,
+    val matchScore: Float? = null,
+    val message: String? = null
+)
+
+/**
  * State machine quy chuẩn cho Kiosk Chấm công TECNIX:
  * IDLE -> FACE_DETECTED -> ALIGNING -> FACE_STABLE -> VERIFYING -> SUCCESS / FAILURE -> COOLDOWN -> IDLE
  */
@@ -94,5 +121,12 @@ data class AttendanceUiState(
     // Chế độ & Điều khiển
     val isSettingsDialogVisible: Boolean = false,
     val isEmployeeSearchVisible: Boolean = false,
-    val isRealMode: Boolean = true // Mặc định chạy thật 100% với ML Kit
+    val isRealMode: Boolean = true, // Mặc định chạy thật 100% với ML Kit
+
+    // Đa mục tiêu Walk-Through (Multi-Face Tracking)
+    val activeTrackedFaces: List<TrackedFaceUiModel> = emptyList(),
+    val lastInferenceLatencyMs: Long = 0L,
+    val lastNetworkLatencyMs: Long = 0L,
+    val lastTotalLatencyMs: Long = 0L,
+    val totalCheckInCount: Int = 0
 )

@@ -32,11 +32,29 @@ class CameraFaceAnalyzer(
         .enableTracking()
         .build()
 
+    companion object {
+        // Dynamic FPS Throttle:
+        // - Khi phòng trống (chưa có người): giới hạn ~5 FPS (mỗi 200ms) để giảm 80-85% tải CPU
+        // - Khi đang phát hiện & bám bắt mặt: tăng tốc lên ~25 FPS (mỗi 40ms) để bắt mặt siêu tốc tức thì
+        private const val IDLE_FRAME_INTERVAL_MS = 200L
+        private const val ACTIVE_FRAME_INTERVAL_MS = 40L
+    }
+
     private val detector: FaceDetector = FaceDetection.getClient(options)
     private val isProcessing = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var lastAnalyzedTimestampMs = 0L
+    @Volatile
+    private var hadFacesLastFrame = false
 
     @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val minInterval = if (hadFacesLastFrame) ACTIVE_FRAME_INTERVAL_MS else IDLE_FRAME_INTERVAL_MS
+        if (now - lastAnalyzedTimestampMs < minInterval) {
+            imageProxy.close()
+            return
+        }
+
         // Chỉ xử lý 1 frame tại 1 thời điểm, tự động bỏ qua frame cũ (zero latency)
         if (!isProcessing.compareAndSet(false, true)) {
             imageProxy.close()
@@ -61,6 +79,7 @@ class CameraFaceAnalyzer(
         detector.process(inputImage)
             .addOnSuccessListener { faces ->
                 if (faces.isEmpty()) {
+                    hadFacesLastFrame = false
                     onAnalysisResult(null)
                     return@addOnSuccessListener
                 }
@@ -89,9 +108,12 @@ class CameraFaceAnalyzer(
                 }
 
                 if (trackedFaces.isEmpty()) {
+                    hadFacesLastFrame = false
                     onAnalysisResult(null)
                     return@addOnSuccessListener
                 }
+
+                hadFacesLastFrame = true
 
                 val allBoundingBoxes = trackedFaces.map { it.boundingBox }
 
@@ -137,9 +159,11 @@ class CameraFaceAnalyzer(
                 )
             }
             .addOnFailureListener {
+                hadFacesLastFrame = false
                 onAnalysisResult(null)
             }
             .addOnCompleteListener {
+                lastAnalyzedTimestampMs = android.os.SystemClock.elapsedRealtime()
                 // Tuyệt đối luôn đóng imageProxy và giải phóng cờ để frame tiếp theo được nhận ngay lập tức
                 imageProxy.close()
                 isProcessing.set(false)

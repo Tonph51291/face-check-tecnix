@@ -173,7 +173,11 @@ object BitmapQualityAnalyzer {
             }
 
             val cropped = Bitmap.createBitmap(bitmap, cropX, cropY, cropW, cropH)
-            Bitmap.createScaledBitmap(cropped, targetSize, targetSize, true)
+            val scaled = Bitmap.createScaledBitmap(cropped, targetSize, targetSize, true)
+            if (scaled != cropped && !cropped.isRecycled) {
+                try { cropped.recycle() } catch (_: Exception) {}
+            }
+            scaled
         } catch (_: Exception) {
             Bitmap.createScaledBitmap(bitmap, targetSize, targetSize, true)
         }
