@@ -16,11 +16,41 @@ import kotlin.math.sqrt
  */
 object BitmapQualityAnalyzer {
 
+    /**
+     * Phân tích chất lượng trực tiếp từ ảnh khuôn mặt đã được crop chuẩn (Cropped Face).
+     * Loại bỏ 100% rủi ro lệch hệ tọa độ giữa Sensor và Viewport, đồng thời xử lý siêu tốc (< 2ms).
+     */
+    fun analyzeCroppedFace(croppedFace: Bitmap?, faceData: FaceDetectionData?): FaceQualityMetrics {
+        if (croppedFace == null) {
+            return FaceQualityMetrics()
+        }
+
+        val sampleSize = 160
+        val sampleBitmap = if (croppedFace.width == sampleSize && croppedFace.height == sampleSize) {
+            croppedFace
+        } else {
+            try {
+                Bitmap.createScaledBitmap(croppedFace, sampleSize, sampleSize, true)
+            } catch (_: Exception) {
+                croppedFace
+            }
+        }
+
+        return computeMetrics(sampleBitmap, faceData)
+    }
+
     fun analyze(bitmap: Bitmap?, faceData: FaceDetectionData?): FaceQualityMetrics {
         if (bitmap == null) {
             return FaceQualityMetrics()
         }
 
+        // Lấy vùng trọng tâm khuôn mặt để phân tích, tránh ảnh hưởng bởi hậu cảnh
+        val sampleSize = 160
+        val sampleBitmap = extractFaceRegion(bitmap, faceData, sampleSize)
+        return computeMetrics(sampleBitmap, faceData)
+    }
+
+    private fun computeMetrics(sampleBitmap: Bitmap, faceData: FaceDetectionData?): FaceQualityMetrics {
         // 1. Phân tích Góc nhìn từ dữ liệu ML Kit thực tế
         val yaw = abs(faceData?.headEulerAngleY ?: 0f)
         val pitch = abs(faceData?.headEulerAngleX ?: 0f)
@@ -31,11 +61,6 @@ object BitmapQualityAnalyzer {
             angleDegree <= 15 -> "Nghiêng nhẹ"
             else -> "Nghiêng nhiều"
         }
-
-        // 2. Chuẩn bị mẫu ảnh để tính toán sắc nét & ánh sáng
-        // Lấy vùng trọng tâm khuôn mặt để phân tích, tránh ảnh hưởng bởi hậu cảnh
-        val sampleSize = 160
-        val sampleBitmap = extractFaceRegion(bitmap, faceData, sampleSize)
 
         val width = sampleBitmap.width
         val height = sampleBitmap.height

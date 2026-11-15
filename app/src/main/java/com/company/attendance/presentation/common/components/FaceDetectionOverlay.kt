@@ -52,8 +52,9 @@ fun FaceDetectionOverlay(
     }
 
     val density = LocalDensity.current
-    val bracketStrokeWidth = with(density) { 3.dp.toPx() }
-    val bracketLength = with(density) { 24.dp.toPx() }
+    val bracketStrokeWidth = remember(density) { with(density) { 3.dp.toPx() } }
+    val bracketLength = remember(density) { with(density) { 24.dp.toPx() } }
+    val badgeBorderStroke = remember { androidx.compose.ui.graphics.drawscope.Stroke(width = 2f) }
 
     // Text Paint tái sử dụng để vẽ thẻ tên AR mà không sinh rác trên Heap
     val textPaint = remember(density) {
@@ -173,7 +174,7 @@ fun FaceDetectionOverlay(
                     topLeft = Offset(pillLeft, pillTop),
                     size = Size(pillWidth, pillHeight),
                     cornerRadius = CornerRadius(14f, 14f),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                    style = badgeBorderStroke
                 )
 
                 // Chữ tên nhân viên

@@ -28,12 +28,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import android.graphics.Rect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -91,6 +89,23 @@ fun AttendanceScreen(
         if (uiState.isEmployeeSearchVisible) {
             onNavigateToEmployeeSearch()
             viewModel.onEvent(AttendanceUiEvent.OnToggleEmployeeSearch(false))
+        }
+    }
+
+    // Quản lý âm thanh phản hồi tách biệt (Clean Audio Manager)
+    val audioFeedbackManager = remember { com.company.attendance.presentation.common.audio.AudioFeedbackManager() }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { audioFeedbackManager.release() }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.uiEffect.collect { effect ->
+            when (effect) {
+                is AttendanceUiEffect.PlaySuccessSound -> audioFeedbackManager.playSuccessBeep()
+                is AttendanceUiEffect.PlayWarningSound -> audioFeedbackManager.playWarningBeep()
+                is AttendanceUiEffect.PlayErrorSound -> audioFeedbackManager.playErrorBeep()
+                is AttendanceUiEffect.ShowToast -> {}
+            }
         }
     }
 
@@ -164,24 +179,11 @@ fun AttendanceScreen(
                     }
 
                     else -> {
-                        var fastDetectedFaces by remember { mutableStateOf<List<Rect>>(emptyList()) }
-                        var fastFrameWidth by remember { mutableIntStateOf(0) }
-                        var fastFrameHeight by remember { mutableIntStateOf(0) }
-                        var fastPrimaryBox by remember { mutableStateOf<Rect?>(null) }
-
-                        // CameraX Preview kèm phân tích frame bằng ML Kit tự động (High-speed 60 FPS)
+                        // CameraX Preview: Nhận diện khuôn mặt thời gian thực
                         CameraPreview(
                             modifier = Modifier.fillMaxSize(),
                             isFrontCamera = uiState.isFrontCamera,
                             onFaceDetected = { faceData ->
-                                val incomingFaces = faceData?.allFaces ?: emptyList()
-                                // Chỉ kích hoạt cập nhật State cục bộ khi danh sách mặt thay đổi để chống Recomposition bão
-                                if (fastDetectedFaces.isNotEmpty() || incomingFaces.isNotEmpty()) {
-                                    fastDetectedFaces = incomingFaces
-                                    fastFrameWidth = faceData?.imageWidth ?: 0
-                                    fastFrameHeight = faceData?.imageHeight ?: 0
-                                    fastPrimaryBox = faceData?.boundingBox
-                                }
                                 viewModel.onEvent(AttendanceUiEvent.OnFaceFrameAnalyzed(faceData))
                             },
                             onCaptureReady = { provider ->
@@ -197,12 +199,12 @@ fun AttendanceScreen(
 
                         // Lớp phủ vẽ góc ngắm và thẻ tên AR đa mục tiêu (Multi-Face Walk-Through)
                         FaceDetectionOverlay(
-                            faces = fastDetectedFaces,
-                            imageWidth = fastFrameWidth,
-                            imageHeight = fastFrameHeight,
-                            primaryFaceBox = fastPrimaryBox,
+                            faces = uiState.detectedFaces,
+                            imageWidth = uiState.frameWidth,
+                            imageHeight = uiState.frameHeight,
+                            primaryFaceBox = uiState.primaryFaceBox,
                             isFrontCamera = uiState.isFrontCamera,
-                            isMultipleFaces = fastDetectedFaces.size > 1,
+                            isMultipleFaces = uiState.activeTrackedFaces.size > 1,
                             trackedFaces = uiState.activeTrackedFaces
                         )
 

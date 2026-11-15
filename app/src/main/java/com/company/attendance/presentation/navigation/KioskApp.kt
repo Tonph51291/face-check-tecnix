@@ -153,8 +153,13 @@ fun KioskApp(
                     capturedBitmap = capturedBitmap,
                     qualityMetrics = faceQualityMetrics ?: FaceQualityMetrics(),
                     onNavigateBack = {
+                        coroutineScope.launch {
+                            employeeRepository.deleteFaceSamples(empId)
+                            employeeRepository.clearDetailCache(empId)
+                        }
                         capturedBitmap = null
                         faceQualityMetrics = null
+                        shouldRefreshEmployeeList = true
                         currentScreen = KioskScreen.EMPLOYEE_DETAIL
                     },
                     onRetakeSample = {

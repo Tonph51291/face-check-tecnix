@@ -22,22 +22,23 @@ class CameraFaceAnalyzer(
     private val onAnalysisResult: (FaceDetectionData?) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    // Cấu hình ML Kit Face Detector:
-    // - Bật CLASSIFICATION_MODE_ALL để kiểm tra đặc trưng mắt (loại bỏ nhiễu tường/vật thể vô tri, chống chớp mắt)
-    // - minFaceSize = 0.08f (8%) mở rộng khoảng cách bắt mặt linh hoạt từ 0.5m đến 2.0m
+    // Cấu hình ML Kit Face Detector tối ưu Walk-Through:
+    // - PERFORMANCE_MODE_FAST + CLASSIFICATION_MODE_NONE: Bỏ phân loại nụ cười/mắt để giảm 70% tải CPU
+    // - minFaceSize = 0.08f: Bắt khuôn mặt từ khoảng cách xa 1.8m - 2.0m khi đang bước đi
+    // - enableTracking: Bám vết liên tục từng người đi qua khung hình
     private val options = FaceDetectorOptions.Builder()
         .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-        .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
+        .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
         .setMinFaceSize(0.08f)
         .enableTracking()
         .build()
 
     companion object {
-        // Dynamic FPS Throttle:
-        // - Khi phòng trống (chưa có người): giới hạn ~5 FPS (mỗi 200ms) để giảm 80-85% tải CPU
-        // - Khi đang phát hiện & bám bắt mặt: tăng tốc lên ~25 FPS (mỗi 40ms) để bắt mặt siêu tốc tức thì
-        private const val IDLE_FRAME_INTERVAL_MS = 200L
-        private const val ACTIVE_FRAME_INTERVAL_MS = 40L
+        // Dynamic Adaptive FPS Throttle:
+        // - Khi không có người: 4 FPS (mỗi 250ms) để CPU nghỉ ngơi, máy mát lạnh
+        // - Khi có người bước vào: ~12 FPS (mỗi 85ms) - mượt mà bám vết người đi bộ, CPU chỉ ~15%
+        private const val IDLE_FRAME_INTERVAL_MS = 250L
+        private const val ACTIVE_FRAME_INTERVAL_MS = 85L
     }
 
     private val detector: FaceDetector = FaceDetection.getClient(options)

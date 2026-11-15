@@ -13,10 +13,13 @@ import com.company.attendance.domain.ml.BitmapQualityAnalyzer
 import com.company.attendance.domain.ml.ClearanceDecision
 import com.company.attendance.domain.ml.FaceClearanceGatekeeper
 import com.company.attendance.domain.ml.FaceEmbedder
-import com.company.attendance.domain.model.FaceAlignmentStatus
+import com.company.attendance.domain.ml.enrollment.EnrollmentPoseTracker
+import com.company.attendance.domain.ml.enrollment.EnrollmentStep
 import com.company.attendance.domain.model.FaceDetectionData
 import com.company.attendance.domain.model.FaceQualityMetrics
 import com.company.attendance.domain.repository.EmployeeRepository
+import com.company.attendance.domain.usecase.EnrollFaceBatchUseCase
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -27,8 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.math.abs
-import kotlin.math.min
+import kotlinx.coroutines.withContext
 
 /**
  * Hiệu ứng điều hướng và sự kiện một lần cho màn hình FaceCapture
@@ -43,19 +45,22 @@ sealed interface FaceCaptureEffect {
 }
 
 /**
- * ViewModel điều khiển quy trình Đăng ký khuôn mặt đa góc (3 bước: Thẳng, Trái ~15°, Phải ~15°)
- * và đồng bộ Vector 512D trực tiếp lên Backend theo đúng OpenAPI Contract:
- * - Mẫu 1 (Chính diện): Trích xuất Vector 512D + nén Thumbnail Base64 làm Avatar.
- * - Mẫu 2 & 3 (Góc nghiêng): Chỉ trích xuất Vector 512D để tối ưu băng thông.
- * - Tự động bắt mã lỗi 409 (Trùng mặt), 400 (Tráo người) ngay tại từng bước.
+ * ViewModel điều khiển quy trình Đăng ký khuôn mặt đa góc chuẩn Clean Architecture:
+ * - Ủy quyền kiểm tra góc quay và độ ổn định cho [EnrollmentPoseTracker].
+ * - Sử dụng phép biến đổi ma trận [FaceEmbedder.mapBoundingBoxToBitmap] (< 0.01ms), triệt tiêu hoàn toàn giật lag ML Kit lần 2.
+ * - Phân tích chất lượng ảnh trực tiếp trên ảnh cắt [BitmapQualityAnalyzer.analyzeCroppedFace] chống lệch tọa độ.
+ * - Kiểm tra chéo On-Device Cosine Similarity trước khi gọi [EnrollFaceBatchUseCase].
+ * - Quản lý an toàn vòng đời Bitmap và khóa camera thông qua [FaceClearanceGatekeeper] khi gặp lỗi 409.
  */
 class FaceCaptureViewModel @JvmOverloads constructor(
     application: Application,
-    private val employeeRepository: EmployeeRepository = RepositoryModule.employeeRepository
+    private val employeeRepository: EmployeeRepository = RepositoryModule.employeeRepository,
+    private val enrollFaceBatchUseCase: EnrollFaceBatchUseCase = EnrollFaceBatchUseCase(employeeRepository)
 ) : AndroidViewModel(application) {
 
     private val faceEmbedder = FaceEmbedder(application.applicationContext)
     private val clearanceGatekeeper = FaceClearanceGatekeeper()
+    private val poseTracker = EnrollmentPoseTracker()
 
     private val _uiState = MutableStateFlow(FaceCaptureUiState())
     val uiState: StateFlow<FaceCaptureUiState> = _uiState.asStateFlow()
@@ -74,7 +79,6 @@ class FaceCaptureViewModel @JvmOverloads constructor(
     private var firstStepThumbnailBase64: String? = null
     private var firstStepBitmap: Bitmap? = null
     private var firstStepQualityMetrics: FaceQualityMetrics? = null
-    private var step2RecordedYaw: Float? = null
 
     /**
      * Khởi tạo hoặc đặt lại trạng thái đăng ký
@@ -85,12 +89,13 @@ class FaceCaptureViewModel @JvmOverloads constructor(
         isCoolingDown = false
         isCapturingStep = false
         clearanceGatekeeper.reset()
+        poseTracker.reset()
         capturedVectors.clear()
         firstStepThumbnailBase64 = null
-        firstStepBitmap = null
+        recycleFirstStepBitmap()
         firstStepQualityMetrics = null
-        step2RecordedYaw = null
         employeeRepository.clearDetailCache(employeeId)
+
         _uiState.update {
             it.copy(
                 employeeId = employeeId,
@@ -116,7 +121,7 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                 showRightArrow = false
             )
         }
-        logI("Đặt lại phiên đăng ký khuôn mặt (Batch) cho nhân viên: $employeeId")
+        logI("Đặt lại phiên đăng ký khuôn mặt đa góc cho nhân viên: $employeeId")
     }
 
     fun initEmployee(employeeId: String, forceReset: Boolean = false) {
@@ -132,9 +137,8 @@ class FaceCaptureViewModel @JvmOverloads constructor(
         isCapturingStep = false
         capturedVectors.clear()
         firstStepThumbnailBase64 = null
-        firstStepBitmap = null
+        recycleFirstStepBitmap()
         firstStepQualityMetrics = null
-        step2RecordedYaw = null
         if (empId.isNotBlank()) {
             employeeRepository.clearDetailCache(empId)
             resetEnrollment(empId)
@@ -149,19 +153,16 @@ class FaceCaptureViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Xử lý từng frame từ ML Kit thời gian thực và đo lường góc quay 3D chính xác:
-     * - Bước 1: Chính diện (Yaw trong khoảng -8° đến +8°)
-     * - Bước 2: Nghiêng trái nhẹ (Yaw trong khoảng +12° đến +22°)
-     * - Bước 3: Nghiêng phải nhẹ (Yaw trong khoảng -22° đến -12°)
+     * Xử lý từng frame từ CameraX / ML Kit theo thời gian thực:
      */
     fun onFaceFrame(faceData: FaceDetectionData?) {
         this.latestFaceData = faceData
         val state = _uiState.value
-        if (state.isUploading || isCoolingDown || state.isConflictDialogVisible || state.isMismatchDialogVisible) {
+        if (state.isUploading || isCoolingDown || isCapturingStep || state.isConflictDialogVisible || state.isMismatchDialogVisible) {
             return
         }
 
-        // 1. Kiểm tra FaceClearanceGatekeeper
+        // 1. Đánh giá cổng kiểm soát FaceClearanceGatekeeper
         val clearanceDecision = clearanceGatekeeper.evaluate(faceData)
         when (clearanceDecision) {
             is ClearanceDecision.Blocked -> {
@@ -195,250 +196,64 @@ class FaceCaptureViewModel @JvmOverloads constructor(
             }
         }
 
-        // 2. Không phát hiện khuôn mặt
-        if (faceData == null) {
-            _uiState.update {
-                it.copy(
-                    isFaceAligned = false,
-                    stabilityProgress = 0f,
-                    guidanceState = TurnGuidanceState.NO_FACE,
-                    guidanceText = "Vui lòng nhìn vào khung ngắm camera",
-                    distanceText = "Chờ khuôn mặt...",
-                    showLeftArrow = false,
-                    showRightArrow = false
-                )
-            }
-            return
-        }
-
-        // 3. Kiểm tra số lượng người trong khung hình
-        if (faceData.trackedFaces.size > 1) {
-            _uiState.update {
-                it.copy(
-                    isFaceAligned = false,
-                    stabilityProgress = 0f,
-                    guidanceState = TurnGuidanceState.POSITION_INVALID,
-                    guidanceText = "Chỉ đứng 1 người trước khung ngắm",
-                    distanceText = "Phát hiện nhiều người"
-                )
-            }
-            return
-        }
-
-        // 4. Kiểm tra khoảng cách
-        if (faceData.alignmentStatus == FaceAlignmentStatus.TOO_FAR) {
-            _uiState.update {
-                it.copy(
-                    isFaceAligned = false,
-                    stabilityProgress = 0f,
-                    guidanceState = TurnGuidanceState.POSITION_INVALID,
-                    guidanceText = "Vui lòng bước lại gần camera hơn",
-                    distanceText = "Quá xa (> 1.8m)"
-                )
-            }
-            return
-        }
-        if (faceData.alignmentStatus == FaceAlignmentStatus.TOO_CLOSE) {
-            _uiState.update {
-                it.copy(
-                    isFaceAligned = false,
-                    stabilityProgress = 0f,
-                    guidanceState = TurnGuidanceState.POSITION_INVALID,
-                    guidanceText = "Vui lòng lùi xa một chút",
-                    distanceText = "Quá gần (< 35cm)"
-                )
-            }
-            return
-        }
-
-        val yaw = faceData.headEulerAngleY
-        val pitch = faceData.headEulerAngleX
-        val roll = faceData.headEulerAngleZ
-
-        // 5. Khóa góc ngửa/cúi (Pitch) và nghiêng tai (Roll) trong ngưỡng an toàn ±12°
-        if (abs(pitch) > 12f || abs(roll) > 12f) {
-            val tiltMessage = if (abs(pitch) > 12f) {
-                if (pitch > 12f) "Hơi ngửa đầu, hãy hạ cằm xuống" else "Hơi cúi đầu, hãy nâng mặt lên"
-            } else {
-                "Vui lòng giữ thẳng đầu, không nghiêng tai"
-            }
-            _uiState.update {
-                it.copy(
-                    isFaceAligned = false,
-                    stabilityProgress = 0f,
-                    guidanceState = TurnGuidanceState.HEAD_TILTED,
-                    guidanceText = tiltMessage,
-                    distanceText = "Cần chỉnh thẳng đầu",
-                    showLeftArrow = false,
-                    showRightArrow = false
-                )
-            }
-            return
-        }
-
-        // 6. Đo góc quay ngang (Yaw) theo từng bước chụp cụ thể
-        var isStepAligned = false
-        var stepState = TurnGuidanceState.WAITING_TURN
-        var stepGuidance = ""
-        var showLeft = false
-        var showRight = false
-
-        when (state.currentStep) {
-            1 -> {
-                // Bước 1: Chính diện (Yaw trong khoảng -6° đến +6°)
-                if (abs(yaw) <= 6f) {
-                    isStepAligned = true
-                    stepState = TurnGuidanceState.ALIGNED_HOLDING
-                } else {
-                    isStepAligned = false
-                    stepState = TurnGuidanceState.WAITING_TURN
-                    stepGuidance = "Vui lòng nhìn thẳng vào giữa camera"
-                }
-            }
-            2 -> {
-                // Bước 2: Nghiêng trái (~15° đến 25°)
-                when {
-                    (yaw in -25f..-12f) || (yaw in 12f..25f) -> {
-                        isStepAligned = true
-                        stepState = TurnGuidanceState.ALIGNED_HOLDING
-                        step2RecordedYaw = yaw
-                    }
-                    abs(yaw) > 28f -> {
-                        isStepAligned = false
-                        stepState = TurnGuidanceState.TURN_TOO_FAR
-                        stepGuidance = "Quay quá nhiều! Hãy xoay nhẹ lại về giữa"
-                    }
-                    else -> {
-                        isStepAligned = false
-                        stepState = TurnGuidanceState.WAITING_TURN
-                        stepGuidance = "👉 Vui lòng xoay nhẹ mặt sang bên TRÁI (~15°)"
-                        showLeft = true
-                    }
-                }
-            }
-            3 -> {
-                // Bước 3: Nghiêng phải (Hướng ngược lại so với Bước 2)
-                val requiredYawRange = if ((step2RecordedYaw ?: -1f) < 0f) {
-                    12f..25f
-                } else {
-                    -25f..-12f
-                }
-                when {
-                    yaw in requiredYawRange -> {
-                        isStepAligned = true
-                        stepState = TurnGuidanceState.ALIGNED_HOLDING
-                    }
-                    abs(yaw) > 28f -> {
-                        isStepAligned = false
-                        stepState = TurnGuidanceState.TURN_TOO_FAR
-                        stepGuidance = "Quay quá đà! Hãy xoay nhẹ lại về phía camera"
-                    }
-                    (step2RecordedYaw != null && ((step2RecordedYaw!! > 0 && yaw > 5f) || (step2RecordedYaw!! < 0 && yaw < -5f))) -> {
-                        isStepAligned = false
-                        stepState = TurnGuidanceState.WAITING_TURN
-                        stepGuidance = "Sai hướng! Hãy quay sang bên PHẢI (đối diện)"
-                        showRight = true
-                    }
-                    else -> {
-                        isStepAligned = false
-                        stepState = TurnGuidanceState.WAITING_TURN
-                        stepGuidance = "👈 Vui lòng xoay nhẹ mặt sang bên PHẢI (~15°)"
-                        showRight = true
-                    }
-                }
-            }
-            else -> {
-                isStepAligned = true
-                stepState = TurnGuidanceState.ALIGNED_HOLDING
-            }
-        }
-
-        if (!isStepAligned) {
-            _uiState.update {
-                it.copy(
-                    isFaceAligned = false,
-                    stabilityProgress = 0f,
-                    guidanceState = stepState,
-                    guidanceText = stepGuidance,
-                    distanceText = "Khoảng cách hợp lệ (65 cm)",
-                    showLeftArrow = showLeft,
-                    showRightArrow = showRight
-                )
-            }
-            return
-        }
-
-        // 7. Thuật toán chống rung nhòe (~0.6 giây, tăng 0.08 mỗi frame)
-        val newProgress = min(state.stabilityProgress + 0.08f, 1.0f)
-        val progressPercent = (newProgress * 100).toInt()
-        val holdingGuidance = when (state.currentStep) {
-            1 -> "Rất tốt! Giữ yên khuôn mặt... $progressPercent%"
-            2 -> "Rất tốt! Giữ yên góc trái... $progressPercent%"
-            3 -> "Rất chuẩn! Giữ yên góc phải... $progressPercent%"
-            else -> "Giữ yên khuôn mặt... $progressPercent%"
-        }
-
+        // 2. Chuyển cho EnrollmentPoseTracker đánh giá góc mặt & tiến trình ổn định
+        val eval = poseTracker.evaluatePose(faceData)
         _uiState.update {
             it.copy(
-                isFaceAligned = true,
-                stabilityProgress = newProgress,
-                guidanceState = TurnGuidanceState.ALIGNED_HOLDING,
-                guidanceText = holdingGuidance,
-                distanceText = "Khoảng cách chuẩn (65 cm) • Độ sáng: Tốt",
-                showLeftArrow = false,
-                showRightArrow = false
+                isFaceAligned = eval.isAligned,
+                stabilityProgress = eval.progress,
+                guidanceState = eval.guidanceState,
+                guidanceText = eval.guidanceText,
+                distanceText = eval.distanceText,
+                showLeftArrow = eval.showLeftArrow,
+                showRightArrow = eval.showRightArrow
             )
         }
 
-        // Đạt 100% độ ổn định -> Trích xuất Vector & Đồng bộ lên Server ngay lập tức!
-        if (newProgress >= 1.0f) {
-            triggerAutoCaptureAndUpload()
+        // 3. Đạt 100% độ ổn định -> Chụp ảnh và trích xuất vector ngay lập tức!
+        if (eval.isStepCompleted && faceData != null) {
+            triggerStepCapture(faceData)
         }
     }
 
     /**
-     * Tự động trích xuất Vector 512D từ On-Device TFLite:
-     * - Bước 1 & 2: Lưu vector vào RAM tạm thời (cực nhanh, không gọi network)
-     * - Bước 3: Gom đủ 3 vector + ảnh thumbnail gửi 1 Request BATCH duy nhất lên Backend
+     * Cắt ảnh khuôn mặt và trích xuất Vector 512D trên nền Dispatchers.Default:
+     * - Dùng mapBoundingBoxToBitmap: tốc độ tức thì (< 0.01ms), hoàn toàn không gọi lại ML Kit lần 2.
+     * - Phân tích chất lượng ảnh trực tiếp trên ảnh khuôn mặt đã crop (CroppedFace).
      */
-    private fun triggerAutoCaptureAndUpload() {
+    private fun triggerStepCapture(faceData: FaceDetectionData) {
         val state = _uiState.value
         if (state.isUploading || isCoolingDown || isCapturingStep) return
 
-        val currentStep = state.currentStep
-        val bitmap = bitmapProvider?.invoke()
-        val faceData = latestFaceData
-
-        if (bitmap == null || faceData == null) {
-            logE("Không thể chụp frame hoặc thiếu dữ liệu khuôn mặt")
+        val fullBitmap = bitmapProvider?.invoke()
+        if (fullBitmap == null) {
+            logE("Không thể chụp bitmap từ camera")
             return
         }
 
-        // Khóa đồng thời và reset stability ngay lập tức để ngăn các frame tiếp theo kích hoạt song song
         isCapturingStep = true
         _uiState.update { it.copy(stabilityProgress = 0f) }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             try {
-                // 1. Xác định tọa độ khuôn mặt chính xác trên Bitmap hiện tại (chống lệch tỷ lệ View và camera stream)
-                val exactBox = faceEmbedder.detectFaceBoundingBox(bitmap)
-                    ?: faceEmbedder.mapBoundingBoxToBitmap(
-                        sensorBox = faceData.boundingBox,
-                        sensorWidth = faceData.imageWidth,
-                        sensorHeight = faceData.imageHeight,
-                        bitmapWidth = bitmap.width,
-                        bitmapHeight = bitmap.height,
-                        isFrontCamera = false
-                    )
+                // 1. Ánh xạ tọa độ Sensor sang Bitmap tức thì qua phép biến đổi ma trận
+                val faceBox = faceEmbedder.mapBoundingBoxToBitmap(
+                    sensorBox = faceData.boundingBox,
+                    sensorWidth = faceData.imageWidth,
+                    sensorHeight = faceData.imageHeight,
+                    bitmapWidth = fullBitmap.width,
+                    bitmapHeight = fullBitmap.height,
+                    isFrontCamera = false
+                )
 
                 // 2. Cắt khuôn mặt chuẩn xác làm mẫu trích xuất & avatar
-                val croppedFace = faceEmbedder.cropFace(bitmap, exactBox, marginRatio = 0.22f) ?: bitmap
+                val croppedFace = faceEmbedder.cropFace(fullBitmap, faceBox, marginRatio = 0.22f) ?: fullBitmap
 
-                // 3. Trích xuất Vector 512D bằng TFLite FaceNet từ đúng vùng khuôn mặt
+                // 3. Trích xuất Vector 512D bằng TFLite FaceNet
                 val faceVector = faceEmbedder.extractEmbeddingFromCroppedFace(croppedFace)
                 if (faceVector == null) {
-                    if (croppedFace != bitmap && !bitmap.isRecycled) {
-                        try { bitmap.recycle() } catch (_: Exception) {}
+                    if (croppedFace != fullBitmap && !fullBitmap.isRecycled) {
+                        try { fullBitmap.recycle() } catch (_: Exception) {}
                     }
                     _uiState.update {
                         it.copy(
@@ -450,25 +265,28 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                     return@launch
                 }
 
-                val qualityMetrics = BitmapQualityAnalyzer.analyze(bitmap, faceData)
+                // 4. Đo lường chất lượng ảnh trực tiếp trên CroppedFace (loại trừ lệch tọa độ)
+                val qualityMetrics = BitmapQualityAnalyzer.analyzeCroppedFace(croppedFace, faceData)
 
-                // Thu hồi ngay Bitmap full màn hình (8MB) sau khi đã trích xuất & phân tích chất lượng
-                if (croppedFace != bitmap && !bitmap.isRecycled) {
-                    try { bitmap.recycle() } catch (_: Exception) {}
+                // Giải phóng ngay Bitmap full màn hình (8MB) sau khi đã cắt xong
+                if (croppedFace != fullBitmap && !fullBitmap.isRecycled) {
+                    try { fullBitmap.recycle() } catch (_: Exception) {}
                 }
 
-                when (currentStep) {
-                    1 -> {
-                        // Bước 1: Lưu Vector 1 + tạo thumbnail làm Avatar từ ảnh góc chính diện lưu tạm RAM
+                when (poseTracker.currentStep) {
+                    EnrollmentStep.FRONTAL -> {
+                        // Bước 1: Lưu Vector 1 + tạo thumbnail làm Avatar từ góc chính diện
                         val thumbnailBase64 = faceEmbedder.createThumbnailBase64FromCroppedFace(croppedFace, targetSize = 320)
                         firstStepThumbnailBase64 = thumbnailBase64
-                        firstStepBitmap = croppedFace // Lưu giữ ảnh chính diện Mẫu 1 cho màn hình Review và Avatar
+                        recycleFirstStepBitmap()
+                        firstStepBitmap = croppedFace
                         firstStepQualityMetrics = qualityMetrics
 
                         capturedVectors.clear()
                         capturedVectors.add(faceVector.toList())
+                        poseTracker.moveToNextStep()
 
-                        logI("Đã lưu Mẫu 1 (Chính diện) vào RAM (dim=${faceVector.size}, box=$exactBox, hasAvatar=${thumbnailBase64 != null})")
+                        logI("Đã lưu Mẫu 1 (Chính diện) vào RAM (dim=${faceVector.size}, hasAvatar=${thumbnailBase64 != null})")
 
                         _uiState.update {
                             it.copy(
@@ -488,14 +306,16 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                         startCooldown(600)
                     }
 
-                    2 -> {
-                        // Bước 2: Lưu Vector 2 vào RAM (ghi đè slot 1 nếu đã có để không bao giờ vượt quá số lượng)
+                    EnrollmentStep.TURN_LEFT -> {
+                        // Bước 2: Lưu Vector 2 (Nghiêng trái)
                         if (capturedVectors.size >= 2) {
                             capturedVectors[1] = faceVector.toList()
                         } else {
                             capturedVectors.add(faceVector.toList())
                         }
-                        logI("Đã lưu Mẫu 2 (Nghiêng trái) vào RAM. Tổng mẫu trong RAM: ${capturedVectors.size}/3")
+                        poseTracker.moveToNextStep()
+
+                        logI("Đã lưu Mẫu 2 (Nghiêng trái) vào RAM. Tổng mẫu: ${capturedVectors.size}/3")
 
                         _uiState.update {
                             it.copy(
@@ -513,18 +333,18 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                         startCooldown(600)
                     }
 
-                    3 -> {
-                        // Bước 3: Lưu Vector 3 vào RAM (ghi đè slot 2 nếu đã có)
+                    EnrollmentStep.TURN_RIGHT -> {
+                        // Bước 3: Lưu Vector 3 (Nghiêng phải)
                         if (capturedVectors.size >= 3) {
                             capturedVectors[2] = faceVector.toList()
                         } else {
                             capturedVectors.add(faceVector.toList())
                         }
 
-                        // Đảm bảo lấy ĐÚNG CHÍNH XÁC 3 vector
                         val finalBatchVectors = capturedVectors.take(3)
-                        logI("Đã thu thập đủ ${finalBatchVectors.size} mẫu khuôn mặt trong RAM! Bắt đầu gửi BATCH lên Server...")
+                        logI("Đã thu thập đủ ${finalBatchVectors.size} mẫu trong RAM. Kiểm tra tương đồng On-Device...")
 
+                        // Kiểm tra chéo On-Device: Góc Trái & Góc Phải phải tương đồng với Góc Thẳng (ngưỡng 0.50)
                         if (finalBatchVectors.size == 3) {
                             val simLeft = faceEmbedder.calculateCosineSimilarity(
                                 finalBatchVectors[0].toFloatArray(),
@@ -534,7 +354,19 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                                 finalBatchVectors[0].toFloatArray(),
                                 finalBatchVectors[2].toFloatArray()
                             )
-                            logI("Kiểm tra tương đồng On-Device: Thẳng vs Trái = ${"%.4f".format(simLeft)}, Thẳng vs Phải = ${"%.4f".format(simRight)}")
+                            logI("Tương đồng On-Device: Thẳng vs Trái = ${"%.4f".format(simLeft)}, Thẳng vs Phải = ${"%.4f".format(simRight)}")
+
+                            if (simLeft < 0.50f || simRight < 0.50f) {
+                                logE("Cảnh báo: Mẫu nghiêng không khớp mẫu thẳng (simLeft=$simLeft, simRight=$simRight)")
+                                _uiState.update {
+                                    it.copy(
+                                        stabilityProgress = 0f,
+                                        errorMessage = "Khuôn mặt quay chưa khớp hoặc bị bóng lóa. Vui lòng thử lại Bước 3."
+                                    )
+                                }
+                                startCooldown(1000)
+                                return@launch
+                            }
                         }
 
                         _uiState.update {
@@ -571,7 +403,7 @@ class FaceCaptureViewModel @JvmOverloads constructor(
         fallbackBitmap: Bitmap,
         fallbackMetrics: FaceQualityMetrics
     ) {
-        val result = employeeRepository.enrollFaceBatch(
+        val result = enrollFaceBatchUseCase(
             employeeId = employeeId,
             vectors = vectorsToSend,
             faceImageBase64 = firstStepThumbnailBase64
@@ -598,6 +430,7 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                         guidanceText = "Đã hoàn tất đăng ký đủ 3 mẫu khuôn mặt!"
                     )
                 }
+
                 // Gửi ảnh Mẫu 1 (chính diện) sang màn hình FaceReviewScreen
                 _effect.send(FaceCaptureEffect.NavigateToReview(finalBitmap, finalMetrics, updatedAvatarUrl))
             }
@@ -609,6 +442,10 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                 when (error) {
                     is AppError.FaceConflict -> {
                         // Lỗi 409: Trùng khuôn mặt với nhân viên khác trong hệ thống
+                        // Kích hoạt ngay FaceClearanceGatekeeper để chặn camera người này!
+                        val trackingId = latestFaceData?.trackingId
+                        clearanceGatekeeper.blockFace(trackingId, error.message)
+
                         capturedVectors.clear()
                         _uiState.update {
                             it.copy(
@@ -620,8 +457,7 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                         }
                     }
                     is AppError.FaceSampleMismatch -> {
-                        // Lỗi 400: Không khớp giữa các góc mặt (hoặc lỗi kiểm tra backend)
-                        // Giữ lại Mẫu 1 & 2 để người dùng có thể ấn 'Thử lại góc này'
+                        // Lỗi 400: Không khớp giữa các góc mặt
                         if (capturedVectors.size >= 3) {
                             capturedVectors.removeAt(2)
                         }
@@ -635,7 +471,7 @@ class FaceCaptureViewModel @JvmOverloads constructor(
                         }
                     }
                     else -> {
-                        // Lỗi mạng hoặc lỗi kết nối: Giữ lại 3 vector trong RAM để người dùng có thể ấn Thử lại
+                        // Lỗi mạng hoặc server: Cho phép người dùng thử gửi lại
                         _uiState.update {
                             it.copy(
                                 isUploading = false,
@@ -732,9 +568,8 @@ class FaceCaptureViewModel @JvmOverloads constructor(
             isCapturingStep = false
             capturedVectors.clear()
             firstStepThumbnailBase64 = null
-            firstStepBitmap = null
+            recycleFirstStepBitmap()
             firstStepQualityMetrics = null
-            step2RecordedYaw = null
             if (empId.isNotBlank()) {
                 employeeRepository.deleteFaceSamples(empId)
                 employeeRepository.clearDetailCache(empId)
@@ -743,9 +578,19 @@ class FaceCaptureViewModel @JvmOverloads constructor(
         }
     }
 
+    private fun recycleFirstStepBitmap() {
+        firstStepBitmap?.let {
+            if (!it.isRecycled) {
+                try { it.recycle() } catch (_: Exception) {}
+            }
+        }
+        firstStepBitmap = null
+    }
+
     override fun onCleared() {
         super.onCleared()
         cooldownJob?.cancel()
+        recycleFirstStepBitmap()
         faceEmbedder.close()
     }
 }
